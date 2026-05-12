@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#ffffff" />
+    <!-- GitHub Pages などHTTPSで公開するとカメラが使える（ローカルの file:// ではカメラは使えないことが多い） -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <title>QRつくるくん</title>
+
+    <!-- 相対パス：この index.html と同じフォルダの style.css / script.js を読みます（Pagesのどのサブパスでも動く） -->
+    <link rel="stylesheet" href="./style.css" />
+
+    <!--
+      生成：qr-code-styling（ロゴ挿入 / 色 / ドット形状 / 目の形状 などが簡単）
+      読み取り：html5-qrcode（スマホのカメラで読み取りできる）
+      ※ CDN なので、このフォルダだけで完結します（ビルド不要）
+    -->
+    <script src="https://cdn.jsdelivr.net/npm/qr-code-styling@1.6.0/lib/qr-code-styling.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.10/html5-qrcode.min.js"></script>
+  </head>
+
+  <body>
+    <header class="header">
+      <div class="header__inner">
+        <div class="brand">
+          <div class="brand__title">QRつくるくん</div>
+          <div class="brand__sub">QRコード作成＆読み取り（スマホ対応）</div>
+        </div>
+      </div>
+    </header>
+
+    <main class="container">
+      <!-- =========================
+        STEP 1: 入力
+      ========================== -->
+      <section class="card" aria-labelledby="step1-title">
+        <div class="card__head">
+          <div class="stepBadge">1</div>
+          <h2 id="step1-title" class="card__title">入力（URL / テキスト）</h2>
+        </div>
+
+        <div class="formRow">
+          <label class="label" for="qrText">QRにしたい内容</label>
+          <textarea
+            id="qrText"
+            class="textarea"
+            rows="3"
+            placeholder="例）https://example.com&#10;例）こんにちは！"
+          ></textarea>
+          <div class="help">空のときはQRを作れません。URLでも文章でもOKです。</div>
+        </div>
+
+        <div class="grid2">
+          <div class="formRow">
+            <label class="label" for="qrSize">サイズ</label>
+            <select id="qrSize" class="select">
+              <option value="220">220px（小）</option>
+              <option value="280" selected>280px（標準）</option>
+              <option value="340">340px（大）</option>
+              <option value="420">420px（特大）</option>
+            </select>
+          </div>
+
+          <div class="formRow">
+            <label class="label" for="errorCorrection">誤り訂正（ロゴを入れるならH推奨）</label>
+            <select id="errorCorrection" class="select">
+              <option value="L">L（低）</option>
+              <option value="M">M（中）</option>
+              <option value="Q">Q（高）</option>
+              <option value="H" selected>H（最高）</option>
+            </select>
+            <div class="help">中央ロゴで欠けても読み取れるようにする強さです。</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- =========================
+        STEP 2: デザイン調整
+      ========================== -->
+      <section class="card" aria-labelledby="step2-title">
+        <div class="card__head">
+          <div class="stepBadge">2</div>
+          <h2 id="step2-title" class="card__title">デザイン調整</h2>
+        </div>
+
+        <div class="grid2">
+          <div class="formRow">
+            <label class="label" for="dotStyle">ドット形状</label>
+            <select id="dotStyle" class="select">
+              <option value="rounded" selected>rounded（丸み）</option>
+              <option value="dots">dots（粒）</option>
+              <option value="classy">classy（細め）</option>
+              <option value="classy-rounded">classy-rounded（細め＋丸み）</option>
+              <option value="square">square（四角）</option>
+              <option value="extra-rounded">extra-rounded（かなり丸い）</option>
+            </select>
+          </div>
+
+          <div class="formRow">
+            <label class="label" for="cornerSquareStyle">目（外枠）の形状</label>
+            <select id="cornerSquareStyle" class="select">
+              <option value="extra-rounded" selected>extra-rounded（丸）</option>
+              <option value="dot">dot（点っぽい）</option>
+              <option value="square">square（四角）</option>
+            </select>
+            <div class="help">四隅の「目」の外側の枠です。</div>
+          </div>
+
+          <div class="formRow">
+            <label class="label" for="cornerDotStyle">目（内側）の形状</label>
+            <select id="cornerDotStyle" class="select">
+              <option value="dot" selected>dot（点）</option>
+              <option value="square">square（四角）</option>
+            </select>
+            <div class="help">四隅の「目」の内側です。</div>
+          </div>
+
+          <div class="formRow">
+            <label class="label" for="qrColor">QRの色</label>
+            <input id="qrColor" class="color" type="color" value="#111827" />
+          </div>
+
+          <div class="formRow">
+            <label class="label" for="bgColor">背景色</label>
+            <input id="bgColor" class="color" type="color" value="#ffffff" />
+          </div>
+
+          <div class="formRow">
+            <label class="label" for="quietZone">余白（静域）</label>
+            <input id="quietZone" class="range" type="range" min="0" max="30" value="10" />
+            <div class="help"><span id="quietZoneValue">10</span> px</div>
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="formRow">
+          <div class="label">中央ロゴ</div>
+
+          <div class="grid2">
+            <div class="formRow">
+              <label class="label" for="presetLogo">プリセットロゴ</label>
+              <select id="presetLogo" class="select">
+                <option value="none" selected>なし</option>
+                <option value="qrts">QRつくるくん（文字）</option>
+                <option value="star">スター</option>
+                <option value="heart">ハート</option>
+                <option value="check">チェック</option>
+              </select>
+              <div class="help">まずはプリセットで試すのがおすすめです。</div>
+            </div>
+
+            <div class="formRow">
+              <label class="label" for="logoUpload">オリジナル画像をアップロード</label>
+              <input id="logoUpload" class="file" type="file" accept="image/*" />
+              <div class="help">アップロードするとプリセットより優先されます。</div>
+            </div>
+          </div>
+
+          <div class="grid2">
+            <div class="formRow">
+              <label class="label" for="logoSize">ロゴサイズ</label>
+              <input id="logoSize" class="range" type="range" min="0" max="60" value="20" />
+              <div class="help"><span id="logoSizeValue">20</span> %（QR全体に対する割合・0%でロゴなし）</div>
+            </div>
+
+            <div class="formRow">
+              <label class="label" for="logoMargin">ロゴ周りの余白（読み取り用）</label>
+              <input id="logoMargin" class="range" type="range" min="0" max="30" value="12" />
+              <div class="help"><span id="logoMarginValue">12</span> px（QRドットを避ける余白）</div>
+            </div>
+          </div>
+
+          <div class="row">
+            <button id="clearLogoBtn" class="btn btn--ghost" type="button">ロゴをクリア</button>
+            <div class="help">ロゴが邪魔で読み取りづらい場合はサイズを下げるかクリアしてください。</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- =========================
+        STEP 3: ダウンロード
+      ========================== -->
+      <section class="card" aria-labelledby="step3-title">
+        <div class="card__head">
+          <div class="stepBadge">3</div>
+          <h2 id="step3-title" class="card__title">ダウンロード</h2>
+        </div>
+
+        <div class="previewWrap">
+          <div class="preview" aria-label="QRプレビュー">
+            <div id="qrPreview"></div>
+          </div>
+
+          <div class="actions">
+            <button id="downloadPngBtn" class="btn btn--primary" type="button">
+              PNGをダウンロード
+            </button>
+            <div class="help">スマホの場合は、ダウンロード後に「写真」や「ファイル」に保存できます。</div>
+            <div id="status" class="status" role="status" aria-live="polite"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- =========================
+        読み取り（カメラ）
+      ========================== -->
+      <section class="card" aria-labelledby="scan-title">
+        <div class="card__head">
+          <div class="stepBadge stepBadge--sub">読</div>
+          <h2 id="scan-title" class="card__title">読み取り（カメラ）</h2>
+        </div>
+
+        <div class="help">
+          カメラの許可が必要です。読み取った内容は下に表示され、ワンタップで入力欄へ反映できます。
+        </div>
+
+        <div class="scanGrid">
+          <div class="scanBox">
+            <div id="qrReader" class="reader"></div>
+            <div class="row">
+              <button id="startScanBtn" class="btn btn--primary" type="button">スキャン開始</button>
+              <button id="stopScanBtn" class="btn btn--ghost" type="button" disabled>停止</button>
+            </div>
+          </div>
+
+          <div class="scanResult">
+            <div class="label">読み取り結果</div>
+            <div id="scanResultText" class="resultBox">まだ読み取り結果はありません。</div>
+            <div class="row">
+              <button id="useScanResultBtn" class="btn btn--ghost" type="button" disabled>
+                入力欄に反映
+              </button>
+              <button id="copyScanResultBtn" class="btn btn--ghost" type="button" disabled>
+                コピー
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <footer class="footer">
+        <div class="footer__inner">
+          <div class="help">
+            ヒント：ロゴを大きくしすぎると読み取りづらくなります（誤り訂正H推奨）。
+          </div>
+        </div>
+      </footer>
+    </main>
+
+    <script src="./script.js"></script>
+  </body>
+</html>
+
