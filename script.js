@@ -439,6 +439,9 @@ async function startScan() {
   if (isScanning || scanBusy) return;
   scanBusy = true;
 
+  // ボタン押下の即時フィードバック（ここが最初に表示される）
+  setScanStatus("スキャン準備中…", false);
+
   const resetButtonsFail = () => {
     el.startScanBtn.disabled = false;
     el.stopScanBtn.disabled = true;
@@ -464,17 +467,30 @@ async function startScan() {
       return;
     }
 
-    setScanStatus(
-      "カメラの許可を求めるダイアログが出たら「許可」を選んでください。拒否した場合はブラウザ設定からこのサイトのカメラをオンにしてください。",
-      false
-    );
+    setScanStatus("カメラを初期化しています…", false);
 
     if (!html5Qr) {
-      html5Qr = new Html5Qrcode(/* element id */ "qrReader", /* verbose */ false);
+      try {
+        html5Qr = new Html5Qrcode("qrReader", { verbose: false });
+      } catch (initErr) {
+        setScanStatus(
+          "カメラの初期化に失敗しました。ページを再読み込みして再度お試しください。（" +
+            (initErr && initErr.message ? initErr.message : String(initErr)) +
+            "）",
+          true
+        );
+        console.error("Html5Qrcode init error:", initErr);
+        return;
+      }
     }
 
     el.startScanBtn.disabled = true;
     el.stopScanBtn.disabled = false;
+
+    setScanStatus(
+      "カメラの許可を求めています。ダイアログが出たら「許可」を選んでください。",
+      false
+    );
 
     const config = buildScannerConfig();
     const onDecoded = (decodedText) => {
@@ -493,6 +509,7 @@ async function startScan() {
       const preferred =
         cameras.find((c) => /back|rear|wide|外|背面|environment/i.test(c.label)) ||
         cameras[cameras.length - 1];
+      setScanStatus("カメラを起動中…", false);
       await html5Qr.start(preferred.id, config, onDecoded, onScanFailure);
       return true;
     }
@@ -501,7 +518,7 @@ async function startScan() {
     try {
       if (await tryStartWithListedCameras()) {
         isScanning = true;
-        setScanStatus("カメラを起動しました。QRコードを枠の中に入れてください。", false);
+        setScanStatus("読み取り開始しました。QRコードを枠の中に入れてください。", false);
         return;
       }
     } catch (e) {
@@ -514,10 +531,14 @@ async function startScan() {
     const attempts = [{ facingMode: "environment" }, { facingMode: "user" }];
     for (let i = 0; i < attempts.length; i += 1) {
       if (i > 0) await resetScannerUi();
+      setScanStatus(
+        "カメラを起動中…（" + (i === 0 ? "背面カメラ" : "前面カメラ") + "）",
+        false
+      );
       try {
         await html5Qr.start(attempts[i], config, onDecoded, onScanFailure);
         isScanning = true;
-        setScanStatus("カメラを起動しました。QRコードを枠の中に入れてください。", false);
+        setScanStatus("読み取り開始しました。QRコードを枠の中に入れてください。", false);
         return;
       } catch (e) {
         lastErr = e;
@@ -527,10 +548,11 @@ async function startScan() {
     await resetScannerUi();
 
     // 3) 許可後にだけカメラ一覧が埋まる端末向けにもう一度 ID 指定を試す
+    setScanStatus("カメラを再検索しています…", false);
     try {
       if (await tryStartWithListedCameras()) {
         isScanning = true;
-        setScanStatus("カメラを起動しました。QRコードを枠の中に入れてください。", false);
+        setScanStatus("読み取り開始しました。QRコードを枠の中に入れてください。", false);
         return;
       }
       lastErr = lastErr || new Error("利用できるカメラがありません");
@@ -546,7 +568,10 @@ async function startScan() {
   } catch (unexpected) {
     isScanning = false;
     resetButtonsFail();
-    setScanStatus(describeScannerError(unexpected), true);
+    setScanStatus(
+      "予期しないエラーが発生しました。" + describeScannerError(unexpected),
+      true
+    );
     console.error(unexpected);
   } finally {
     scanBusy = false;

@@ -249,10 +249,44 @@
       </footer>
     </main>
 
-    <!-- 読み込み順：qr-code-styling → html5-qrcode → このアプリの script.js -->
+    <!-- qr-code-styling（QR生成用・同期読み込み） -->
     <script src="https://cdn.jsdelivr.net/npm/qr-code-styling@1.6.0/lib/qr-code-styling.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.10/html5-qrcode.min.js"></script>
-    <script src="./script.js"></script>
+
+    <!--
+      html5-qrcode: Safari/iPhone では CDN が読み込めないことがあるため
+      jsdelivr → unpkg の順でフォールバック読み込みし、完了後に script.js を起動する。
+    -->
+    <script>
+    (function () {
+      'use strict';
+      var H5QR_URLS = [
+        'https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.10/html5-qrcode.min.js',
+        'https://unpkg.com/html5-qrcode@2.3.10/html5-qrcode.min.js',
+      ];
+      var tried = 0;
+
+      function tryNext() {
+        if (tried >= H5QR_URLS.length) {
+          // すべてのCDNが失敗 → script.js 側でエラー表示する
+          loadApp();
+          return;
+        }
+        var s = document.createElement('script');
+        s.src = H5QR_URLS[tried++];
+        s.onload = loadApp;
+        s.onerror = function () { tryNext(); };
+        document.head.appendChild(s);
+      }
+
+      function loadApp() {
+        var s = document.createElement('script');
+        s.src = './script.js';
+        document.head.appendChild(s);
+      }
+
+      tryNext();
+    }());
+    </script>
   </body>
 </html>
 
