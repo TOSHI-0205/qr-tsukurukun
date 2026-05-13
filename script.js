@@ -335,24 +335,53 @@ async function downloadPng() {
   const filename = `${name}.png`;
 
   setStatus("PNGを作成中…");
+
+  // まず Blob を取得する（iOS の Web Share API にも使う）
+  let blob = null;
+  try {
+    blob = await qrCode.getRawData("png");
+    if (!(blob instanceof Blob)) blob = null;
+  } catch (_) {
+    blob = null;
+  }
+
+  // --- iOS Safari / Chrome: Web Share API でシェアシートを出す ---
+  // シェアシートの「写真に保存」を選ぶと写真アプリに保存できる
+  const isIos = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+  if (isIos && blob && navigator.share) {
+    const file = new File([blob], filename, { type: "image/png" });
+    const canShare = !navigator.canShare || navigator.canShare({ files: [file] });
+    if (canShare) {
+      setStatus("シェアシートが開きます。「写真に保存」を選んでください。");
+      try {
+        await navigator.share({ files: [file] });
+        setStatus("");
+        return;
+      } catch (shareErr) {
+        if (shareErr.name === "AbortError") {
+          // ユーザーがシェアシートをキャンセルした
+          setStatus("");
+          return;
+        }
+        console.warn("Web Share API 失敗、通常ダウンロードにフォールバック", shareErr);
+      }
+    }
+  }
+
+  // --- PC・Android・iOS でシェアが使えない場合: 通常ダウンロード ---
+  if (blob) {
+    downloadBlobAsFile(blob, filename);
+    setStatus("PNGをダウンロードしました。");
+    return;
+  }
+
+  // getRawData が使えない環境は qrCode.download() を試す
   try {
     await qrCode.download({ extension: "png", name });
     setStatus("PNGをダウンロードしました。");
-  } catch (e1) {
-    console.warn("download() が失敗したため getRawData で再試行します", e1);
-    try {
-      const blob = await qrCode.getRawData("png");
-      if (!(blob instanceof Blob)) {
-        throw new Error("PNGのデータを取得できませんでした");
-      }
-      downloadBlobAsFile(blob, filename);
-      setStatus("PNGをダウンロードしました。");
-    } catch (e2) {
-      setStatus(
-        "ダウンロードに失敗しました。ロゴ画像を変えるか、別ブラウザで試してください。"
-      );
-      console.error(e2);
-    }
+  } catch (e) {
+    setStatus("ダウンロードに失敗しました。ロゴ画像を変えるか、別ブラウザで試してください。");
+    console.error(e);
   }
 }
 
