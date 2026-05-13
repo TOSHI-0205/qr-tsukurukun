@@ -13,13 +13,7 @@
     <!-- 相対パス：この index.html と同じフォルダの style.css / script.js を読みます（Pagesのどのサブパスでも動く） -->
     <link rel="stylesheet" href="./style.css" />
 
-    <!--
-      生成：qr-code-styling（ロゴ挿入 / 色 / ドット形状 / 目の形状 などが簡単）
-      読み取り：html5-qrcode（スマホのカメラで読み取りできる）
-      ※ CDN なので、このフォルダだけで完結します（ビルド不要）
-    -->
-    <script src="https://cdn.jsdelivr.net/npm/qr-code-styling@1.6.0/lib/qr-code-styling.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.10/html5-qrcode.min.js"></script>
+    <!-- ライブラリは </body> 直前で順に読み込みます（script.js より先に必ず実行されるようにする） -->
   </head>
 
   <body>
@@ -215,8 +209,12 @@
         </div>
 
         <div class="help">
-          カメラの許可が必要です。読み取った内容は下に表示され、ワンタップで入力欄へ反映できます。
+          <strong>カメラの許可が必要です。</strong>
+          初回はブラウザの確認ダイアログで「許可」を選んでください。拒否した場合は、OS／ブラウザの設定からこのサイトのカメラをオンにしてください。
         </div>
+
+        <!-- カメラまわりのエラー・案内はここに出します（ページ上部のメッセージとは別） -->
+        <div id="scanStatus" class="scanStatus" role="alert" aria-live="assertive"></div>
 
         <div class="scanGrid">
           <div class="scanBox">
@@ -251,6 +249,9 @@
       </footer>
     </main>
 
+    <!-- 読み込み順：qr-code-styling → html5-qrcode → このアプリの script.js -->
+    <script src="https://cdn.jsdelivr.net/npm/qr-code-styling@1.6.0/lib/qr-code-styling.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.10/html5-qrcode.min.js"></script>
     <script src="./script.js"></script>
   </body>
 </html>

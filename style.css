@@ -280,10 +280,35 @@ body {
 
 .reader {
   width: 100%;
+  /* html5-qrcode は内部で video を置くため、高さゼロだとスマホ（特に iOS）で起動に失敗することがあります */
+  min-height: 260px;
   border-radius: 16px;
   overflow: hidden;
   border: 1px solid var(--line);
   background: #f9fafb;
+}
+
+/* カメラエリア用メッセージ（ページ上部の #status とは別） */
+.scanStatus {
+  margin: 10px 0 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #f9fafb;
+  font-size: 14px;
+  color: #111827;
+  line-height: 1.55;
+  min-height: 0;
+}
+
+.scanStatus:empty {
+  display: none;
+}
+
+.scanStatus--error {
+  border-color: #fca5a5;
+  background: #fef2f2;
+  color: #991b1b;
 }
 
 .resultBox {

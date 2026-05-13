@@ -41,11 +41,19 @@ const el = {
   scanResultText: document.getElementById("scanResultText"),
   useScanResultBtn: document.getElementById("useScanResultBtn"),
   copyScanResultBtn: document.getElementById("copyScanResultBtn"),
+  scanStatus: document.getElementById("scanStatus"),
 };
 
 // ===== 小さなユーティリティ =====
 function setStatus(message) {
   el.status.textContent = message || "";
+}
+
+/** カメラ読み取りエリア用（画面上でその場に表示。HTTPS・権限の案内もここへ） */
+function setScanStatus(message, isError) {
+  if (!el.scanStatus) return;
+  el.scanStatus.textContent = message || "";
+  el.scanStatus.classList.toggle("scanStatus--error", Boolean(isError && message));
 }
 
 function clamp(n, min, max) {
@@ -352,6 +360,8 @@ async function downloadPng() {
 let html5Qr = null;
 let isScanning = false;
 let lastScanText = "";
+/** 起動処理の連打防止（非同期のあいだも二度押ししない） */
+let scanBusy = false;
 
 function setScanResult(text) {
   lastScanText = text || "";
@@ -366,68 +376,181 @@ function setScanResult(text) {
   el.copyScanResultBtn.disabled = false;
 }
 
-async function startScan() {
-  if (isScanning) return;
-  setScanResult("");
+/** スキャン失敗時に中身を掃除（連続で別カメラを試すときに必要） */
+async function resetScannerUi() {
+  if (!html5Qr) return;
+  try {
+    await html5Qr.stop();
+  } catch (_) {
+    /* 未起動ならここは失敗して問題ない */
+  }
+  try {
+    html5Qr.clear();
+  } catch (_) {
+    /* 古い環境で無い場合もある */
+  }
+}
 
-  // html5-qrcode は要素IDで初期化します
-  if (!html5Qr) html5Qr = new Html5Qrcode("qrReader");
+/** ブラウザから返るエラーを日本語で簡潔に */
+function describeScannerError(err) {
+  const name = err && err.name;
+  const msg = (err && err.message) || "";
 
-  el.startScanBtn.disabled = true;
-  el.stopScanBtn.disabled = false;
-
-  const vw = Math.min(window.innerWidth || 400, 520);
-  const box = Math.max(160, Math.min(280, vw - 48));
-
-  const config = {
-    fps: 10,
-    qrbox: { width: box, height: box },
-    aspectRatio: 1.0,
-  };
-
-  const onDecoded = (decodedText) => {
-    if (decodedText && decodedText !== lastScanText) {
-      setScanResult(decodedText);
-    }
-  };
-  const onScanFailure = () => {};
-
-  // iOS / Android で背面カメラ指定だけだと失敗することがあるため順に試す
-  const constraintAttempts = [{ facingMode: "environment" }, { facingMode: "user" }];
-  let lastErr = null;
-
-  for (const constraints of constraintAttempts) {
-    try {
-      await html5Qr.start(constraints, config, onDecoded, onScanFailure);
-      isScanning = true;
-      return;
-    } catch (e) {
-      lastErr = e;
-    }
+  if (name === "NotAllowedError" || /permission/i.test(msg)) {
+    return "カメラの使用が拒否されました。アドレスバーの鍵アイコン／サイトの設定で、このサイトのカメラを「許可」にしてください。";
+  }
+  if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+    return "カメラが見つかりません。外付けカメラの場合は接続を確認してください。";
+  }
+  if (name === "NotReadableError" || name === "TrackStartError") {
+    return "カメラが他のアプリで使用中か、読み取りできませんでした。ほかのアプリを閉じてから再度お試しください。";
+  }
+  if (name === "OverconstrainedError") {
+    return "この端末では指定したカメラ設定が使えませんでした。別のブラウザや更新で試してください。";
+  }
+  if (name === "AbortError") {
+    return "カメラの起動が中断されました。もう一度「スキャン開始」を押してください。";
+  }
+  if (name === "SecurityError" || /secure context/i.test(msg)) {
+    return "セキュリティ制限でカメラを使えません。HTTPSのURL（GitHub Pages の https://〜）で開いてください。";
   }
 
+  const short = msg.length > 120 ? `${msg.slice(0, 120)}…` : msg;
+  return short ? `カメラを開始できませんでした（${short}）` : "カメラを開始できませんでした。";
+}
+
+function buildScannerConfig() {
+  const narrow = (window.innerWidth || 800) <= 768;
+  return {
+    fps: 10,
+    // ビューファインダ実寸に合わせる（固定サイズが大きすぎると iPhone 等で start が失敗することがある）
+    qrbox: (viewfinderWidth, viewfinderHeight) => {
+      const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+      const side = Math.max(140, Math.floor(minEdge * 0.72));
+      return { width: side, height: side };
+    },
+    // スマホカメラは縦動画が多く、1.0 だと内部エラーになることがある
+    aspectRatio: narrow ? 1.777778 : 1.333333,
+    disableFlip: false,
+  };
+}
+
+async function startScan() {
+  if (isScanning || scanBusy) return;
+  scanBusy = true;
+
+  const resetButtonsFail = () => {
+    el.startScanBtn.disabled = false;
+    el.stopScanBtn.disabled = true;
+  };
+
   try {
-    const cameras = await Html5Qrcode.getCameras();
-    if (cameras && cameras.length) {
+    setScanResult("");
+
+    if (typeof Html5Qrcode === "undefined") {
+      setScanStatus(
+        "読み取りライブラリ（html5-qrcode）が読み込めていません。ページを再読み込みするか、通信・広告ブロックを確認してください。",
+        true
+      );
+      return;
+    }
+
+    // GitHub Pages は HTTPS なので通常 true。file:// ではカメラが使えないことが多い。
+    if (!window.isSecureContext) {
+      setScanStatus(
+        "この環境ではカメラを安全に使えません（セキュアなコンテキストではありません）。GitHub Pages の https:// から開いてください。",
+        true
+      );
+      return;
+    }
+
+    setScanStatus(
+      "カメラの許可を求めるダイアログが出たら「許可」を選んでください。拒否した場合はブラウザ設定からこのサイトのカメラをオンにしてください。",
+      false
+    );
+
+    if (!html5Qr) {
+      html5Qr = new Html5Qrcode(/* element id */ "qrReader", /* verbose */ false);
+    }
+
+    el.startScanBtn.disabled = true;
+    el.stopScanBtn.disabled = false;
+
+    const config = buildScannerConfig();
+    const onDecoded = (decodedText) => {
+      if (decodedText && decodedText !== lastScanText) {
+        setScanResult(decodedText);
+      }
+    };
+    const onScanFailure = () => {};
+
+    let lastErr = null;
+
+    /** 列挙できたカメラ ID で開始（iPhone / Android で facingMode より安定することが多い） */
+    async function tryStartWithListedCameras() {
+      const cameras = await Html5Qrcode.getCameras();
+      if (!cameras || !cameras.length) return false;
       const preferred =
         cameras.find((c) => /back|rear|wide|外|背面|environment/i.test(c.label)) ||
         cameras[cameras.length - 1];
       await html5Qr.start(preferred.id, config, onDecoded, onScanFailure);
-      isScanning = true;
-      return;
+      return true;
     }
-  } catch (e) {
-    lastErr = e;
-  }
 
-  isScanning = false;
-  el.startScanBtn.disabled = false;
-  el.stopScanBtn.disabled = true;
-  setScanResult("");
-  setStatus(
-    "カメラを開始できませんでした。HTTPS（GitHub PagesのURL）で開いているか、ブラウザでカメラを許可してください。"
-  );
-  console.error(lastErr);
+    // 1) 最初から一覧が取れる環境
+    try {
+      if (await tryStartWithListedCameras()) {
+        isScanning = true;
+        setScanStatus("カメラを起動しました。QRコードを枠の中に入れてください。", false);
+        return;
+      }
+    } catch (e) {
+      lastErr = e;
+    }
+
+    await resetScannerUi();
+
+    // 2) facingMode（許可ダイアログが出やすい）。固定 qrbox より可変 qrbox の方が失敗しにくい
+    const attempts = [{ facingMode: "environment" }, { facingMode: "user" }];
+    for (let i = 0; i < attempts.length; i += 1) {
+      if (i > 0) await resetScannerUi();
+      try {
+        await html5Qr.start(attempts[i], config, onDecoded, onScanFailure);
+        isScanning = true;
+        setScanStatus("カメラを起動しました。QRコードを枠の中に入れてください。", false);
+        return;
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+
+    await resetScannerUi();
+
+    // 3) 許可後にだけカメラ一覧が埋まる端末向けにもう一度 ID 指定を試す
+    try {
+      if (await tryStartWithListedCameras()) {
+        isScanning = true;
+        setScanStatus("カメラを起動しました。QRコードを枠の中に入れてください。", false);
+        return;
+      }
+      lastErr = lastErr || new Error("利用できるカメラがありません");
+    } catch (e) {
+      lastErr = e;
+    }
+
+    isScanning = false;
+    resetButtonsFail();
+    setScanResult("");
+    setScanStatus(describeScannerError(lastErr), true);
+    console.error(lastErr);
+  } catch (unexpected) {
+    isScanning = false;
+    resetButtonsFail();
+    setScanStatus(describeScannerError(unexpected), true);
+    console.error(unexpected);
+  } finally {
+    scanBusy = false;
+  }
 }
 
 async function stopScan() {
@@ -440,6 +563,7 @@ async function stopScan() {
     isScanning = false;
     el.startScanBtn.disabled = false;
     el.stopScanBtn.disabled = true;
+    setScanStatus("", false);
   }
 }
 
@@ -521,6 +645,18 @@ el.copyScanResultBtn.addEventListener("click", copyScanResult);
 window.addEventListener("beforeunload", () => {
   stopScan();
 });
+
+// CDN からライブラリが読み込めなかったときの案内（ここで早期に気づけるようにする）
+if (typeof Html5Qrcode === "undefined") {
+  setScanStatus(
+    "読み取りライブラリ（html5-qrcode）が読み込めていません。ページを再読み込みするか、通信・広告ブロックを確認してください。",
+    true
+  );
+  el.startScanBtn.disabled = true;
+}
+if (typeof QRCodeStyling === "undefined") {
+  setStatus("QR生成ライブラリが読み込めていません。ページを再読み込みしてください。");
+}
 
 // 初期表示
 syncRangeLabels();
