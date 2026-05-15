@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>転送中... - QRつくるくん</title>
+  <style>
+    :root { --primary: #2563eb; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial,
+        "Noto Sans JP", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+      background: #f9fafb;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100dvh;
+      padding: 24px;
+    }
+    .card {
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 20px;
+      box-shadow: 0 10px 30px rgba(17, 24, 39, 0.08);
+      padding: 40px 32px;
+      max-width: 440px;
+      width: 100%;
+      text-align: center;
+    }
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 4px solid #e5e7eb;
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      margin: 0 auto 20px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    h1 { font-size: 18px; font-weight: 800; color: #111827; margin-bottom: 8px; }
+    p { font-size: 14px; color: #6b7280; line-height: 1.6; margin-top: 6px; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+      background: rgba(0, 0, 0, 0.06);
+      border-radius: 4px;
+      padding: 1px 5px;
+    }
+    .url {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+      color: var(--primary);
+      word-break: break-all;
+      margin-top: 8px;
+    }
+    .err-icon { font-size: 36px; margin-bottom: 12px; }
+    .back {
+      display: inline-block;
+      margin-top: 20px;
+      font-size: 14px;
+      color: var(--primary);
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .back:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="card" id="card">
+    <div class="spinner" id="spinner"></div>
+    <h1 id="title">転送中...</h1>
+    <p id="desc">しばらくお待ちください。</p>
+  </div>
+
+  <script>
+  (async () => {
+    'use strict';
+
+    const id = new URLSearchParams(location.search).get('id') || '';
+    const spinner = document.getElementById('spinner');
+    const title = document.getElementById('title');
+    const desc = document.getElementById('desc');
+
+    /** テキストをHTMLエスケープする（XSS防止） */
+    function esc(s) {
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function showError(heading, detailHtml) {
+      spinner.style.display = 'none';
+      title.textContent = heading;
+      desc.innerHTML = detailHtml + '<br><a class="back" href="./">QRつくるくんへ戻る</a>';
+    }
+
+    if (!id) {
+      showError(
+        'IDが指定されていません',
+        'URLに <code>?id=●●</code> が必要です。QRつくるくんで可変QRを作り直してください。'
+      );
+      return;
+    }
+
+    try {
+      const res = await fetch('./links.json', { cache: 'no-cache' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const links = await res.json();
+      const url = links[id];
+
+      if (!url) {
+        showError(
+          '転送先が見つかりません',
+          '<code>' + esc(id) + '</code> に対応するURLが <code>links.json</code> にありません。ファイルを確認してください。'
+        );
+        return;
+      }
+
+      // 転送先URLを表示してから移動（ユーザーに行き先を一瞬見せる）
+      title.textContent = '転送中...';
+      desc.innerHTML = '<span class="url">' + esc(url) + '</span>';
+
+      location.replace(url);
+    } catch (e) {
+      showError(
+        'links.json を読み込めません',
+        'ファイルが存在するか、同じフォルダに置いてあるか確認してください。'
+      );
+      console.error(e);
+    }
+  })();
+  </script>
+</body>
+</html>

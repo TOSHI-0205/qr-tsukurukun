@@ -106,11 +106,6 @@ body {
   flex: 0 0 auto;
 }
 
-.stepBadge--sub {
-  background: #374151;
-  font-size: 14px;
-}
-
 .divider {
   height: 1px;
   background: var(--line);
@@ -138,7 +133,8 @@ body {
 
 .textarea,
 .select,
-.file {
+.file,
+.input {
   width: 100%;
   padding: 12px 12px;
   border: 1px solid var(--line);
@@ -151,6 +147,7 @@ body {
 .textarea:focus,
 .select:focus,
 .file:focus,
+.input:focus,
 .btn:focus,
 .color:focus,
 .range:focus {
@@ -200,7 +197,7 @@ body {
   font-weight: 800;
   cursor: pointer;
   min-height: 48px; /* スマホで押しやすい */
-  touch-action: manipulation; /* ダブルタップズームを抑え、タップ応答を速くする（GitHub Pagesのスマホ向け） */
+  touch-action: manipulation; /* ダブルタップズームを抑え、タップ応答を速くする */
 }
 
 .btn[disabled] {
@@ -263,62 +260,79 @@ body {
   min-height: 18px;
 }
 
-/* 読み取り */
-.scanGrid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
-  align-items: start;
-  margin-top: 10px;
-}
-
-@media (max-width: 900px) {
-  .scanGrid {
-    grid-template-columns: 1fr;
-  }
-}
-
-.reader {
-  width: 100%;
-  /* html5-qrcode は内部で video を置くため、高さゼロだとスマホ（特に iOS）で起動に失敗することがあります */
-  min-height: 260px;
-  border-radius: 16px;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  background: #f9fafb;
-}
-
-/* カメラエリア用メッセージ（ページ上部の #status とは別） */
-.scanStatus {
-  margin: 10px 0 0;
-  padding: 12px 14px;
-  border-radius: 12px;
-  border: 1px solid var(--line);
-  background: #f9fafb;
-  font-size: 14px;
-  color: #111827;
-  line-height: 1.55;
-  min-height: 0;
-}
-
-.scanStatus:empty {
-  display: none;
-}
-
-.scanStatus--error {
-  border-color: #fca5a5;
-  background: #fef2f2;
-  color: #991b1b;
-}
-
-.resultBox {
+/* モード切替タブ */
+.modeToggle {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 14px;
   border: 1px solid var(--line);
   border-radius: 14px;
-  padding: 12px;
-  min-height: 120px;
-  background: #ffffff;
+  padding: 4px;
+  background: #f9fafb;
+}
+
+.modeBtn {
+  flex: 1;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 10px;
   font-size: 14px;
-  word-break: break-word;
+  font-weight: 700;
+  cursor: pointer;
+  background: transparent;
+  color: var(--muted);
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+  min-height: 44px;
+  touch-action: manipulation;
+}
+
+.modeBtn--active {
+  background: #fff;
+  color: var(--text);
+  box-shadow: 0 2px 8px rgba(17, 24, 39, 0.1);
+}
+
+/* 可変QR 説明ボックス */
+.infoBox {
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 12px;
+  padding: 14px 16px;
+  font-size: 13px;
+  line-height: 1.7;
+  margin-bottom: 12px;
+}
+
+.infoBox--code {
+  background: #f8fafc;
+  border-color: var(--line);
+}
+
+.infoBox pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  background: #f1f5f9;
+  border-radius: 8px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  color: #0f172a;
+  margin: 6px 0 0;
+}
+
+.infoBox code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
+/* 可変QR URL表示 */
+.variableQrUrlText {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  color: var(--primary);
+  word-break: break-all;
 }
 
 /* フッター */
@@ -329,4 +343,3 @@ body {
 .footer__inner {
   padding: 0 4px;
 }
-

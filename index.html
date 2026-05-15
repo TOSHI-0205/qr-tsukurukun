@@ -4,16 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#ffffff" />
-    <!-- GitHub Pages などHTTPSで公開するとカメラが使える（ローカルの file:// ではカメラは使えないことが多い） -->
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>QRつくるくん</title>
-
-    <!-- 相対パス：この index.html と同じフォルダの style.css / script.js を読みます（Pagesのどのサブパスでも動く） -->
     <link rel="stylesheet" href="./style.css" />
-
-    <!-- ライブラリは </body> 直前で順に読み込みます（script.js より先に必ず実行されるようにする） -->
   </head>
 
   <body>
@@ -21,7 +16,7 @@
       <div class="header__inner">
         <div class="brand">
           <div class="brand__title">QRつくるくん</div>
-          <div class="brand__sub">QRコード作成＆読み取り（スマホ対応）</div>
+          <div class="brand__sub">QRコード作成（通常QR・可変QR対応）</div>
         </div>
       </div>
     </header>
@@ -36,15 +31,66 @@
           <h2 id="step1-title" class="card__title">入力（URL / テキスト）</h2>
         </div>
 
-        <div class="formRow">
-          <label class="label" for="qrText">QRにしたい内容</label>
-          <textarea
-            id="qrText"
-            class="textarea"
-            rows="3"
-            placeholder="例）https://example.com&#10;例）こんにちは！"
-          ></textarea>
-          <div class="help">空のときはQRを作れません。URLでも文章でもOKです。</div>
+        <!-- モード切替タブ -->
+        <div class="modeToggle" role="tablist" aria-label="QRモード切替">
+          <button id="modeNormal" class="modeBtn modeBtn--active" type="button" role="tab" aria-selected="true">
+            通常QR
+          </button>
+          <button id="modeVariable" class="modeBtn" type="button" role="tab" aria-selected="false">
+            可変QR
+          </button>
+        </div>
+
+        <!-- 通常QR -->
+        <div id="normalQrSection">
+          <div class="formRow">
+            <label class="label" for="qrText">QRにしたい内容</label>
+            <textarea
+              id="qrText"
+              class="textarea"
+              rows="3"
+              placeholder="例）https://example.com&#10;例）こんにちは！"
+            ></textarea>
+            <div class="help">空のときはQRを作れません。URLでも文章でもOKです。</div>
+          </div>
+        </div>
+
+        <!-- 可変QR -->
+        <div id="variableQrSection" hidden>
+          <div class="infoBox">
+            <strong>可変QRとは？</strong><br>
+            QRコードには「このアプリ内の転送ページ（<code>go.html?id=●●</code>）」を入れておき、転送先は <code>links.json</code> に記録します。<br>
+            QRを印刷した後でも <strong>links.json を書き換えるだけで転送先を変更できます</strong>。
+            <ul style="margin:8px 0 0; padding-left:1.4em;">
+              <li>QRにはこのアプリ内の <code>go.html?id=●●</code> が入る</li>
+              <li><code>go.html</code> が <code>links.json</code> を読んで自動で転送する</li>
+              <li>転送先を変えたいときは <code>links.json</code> だけ編集すればOK</li>
+            </ul>
+          </div>
+
+          <div class="formRow">
+            <label class="label" for="variableId">ID（半角英数字・ハイフン）</label>
+            <input
+              id="variableId"
+              class="input"
+              type="text"
+              placeholder="例）youtube"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <div class="help">
+              生成されるURL：<span id="variableQrUrl" class="variableQrUrlText">（IDを入力してください）</span>
+            </div>
+          </div>
+
+          <div class="infoBox infoBox--code">
+            <strong>links.json の例（index.html と同じフォルダに置く）</strong>
+            <pre>{
+  "youtube": "https://www.youtube.com/",
+  "note":    "https://note.com/",
+  "line":    "https://line.me/"
+}</pre>
+          </div>
         </div>
 
         <div class="grid2">
@@ -199,47 +245,6 @@
         </div>
       </section>
 
-      <!-- =========================
-        読み取り（カメラ）
-      ========================== -->
-      <section class="card" aria-labelledby="scan-title">
-        <div class="card__head">
-          <div class="stepBadge stepBadge--sub">読</div>
-          <h2 id="scan-title" class="card__title">読み取り（カメラ）</h2>
-        </div>
-
-        <div class="help">
-          <strong>カメラの許可が必要です。</strong>
-          初回はブラウザの確認ダイアログで「許可」を選んでください。拒否した場合は、OS／ブラウザの設定からこのサイトのカメラをオンにしてください。
-        </div>
-
-        <!-- カメラまわりのエラー・案内はここに出します（ページ上部のメッセージとは別） -->
-        <div id="scanStatus" class="scanStatus" role="alert" aria-live="assertive"></div>
-
-        <div class="scanGrid">
-          <div class="scanBox">
-            <div id="qrReader" class="reader"></div>
-            <div class="row">
-              <button id="startScanBtn" class="btn btn--primary" type="button">スキャン開始</button>
-              <button id="stopScanBtn" class="btn btn--ghost" type="button" disabled>停止</button>
-            </div>
-          </div>
-
-          <div class="scanResult">
-            <div class="label">読み取り結果</div>
-            <div id="scanResultText" class="resultBox">まだ読み取り結果はありません。</div>
-            <div class="row">
-              <button id="useScanResultBtn" class="btn btn--ghost" type="button" disabled>
-                入力欄に反映
-              </button>
-              <button id="copyScanResultBtn" class="btn btn--ghost" type="button" disabled>
-                コピー
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
-
       <footer class="footer">
         <div class="footer__inner">
           <div class="help">
@@ -249,44 +254,8 @@
       </footer>
     </main>
 
-    <!-- qr-code-styling（QR生成用・同期読み込み） -->
+    <!-- qr-code-styling（QR生成用） -->
     <script src="https://cdn.jsdelivr.net/npm/qr-code-styling@1.6.0/lib/qr-code-styling.js"></script>
-
-    <!--
-      html5-qrcode: Safari/iPhone では CDN が読み込めないことがあるため
-      jsdelivr → unpkg の順でフォールバック読み込みし、完了後に script.js を起動する。
-    -->
-    <script>
-    (function () {
-      'use strict';
-      var H5QR_URLS = [
-        'https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.10/html5-qrcode.min.js',
-        'https://unpkg.com/html5-qrcode@2.3.10/html5-qrcode.min.js',
-      ];
-      var tried = 0;
-
-      function tryNext() {
-        if (tried >= H5QR_URLS.length) {
-          // すべてのCDNが失敗 → script.js 側でエラー表示する
-          loadApp();
-          return;
-        }
-        var s = document.createElement('script');
-        s.src = H5QR_URLS[tried++];
-        s.onload = loadApp;
-        s.onerror = function () { tryNext(); };
-        document.head.appendChild(s);
-      }
-
-      function loadApp() {
-        var s = document.createElement('script');
-        s.src = './script.js';
-        document.head.appendChild(s);
-      }
-
-      tryNext();
-    }());
-    </script>
+    <script src="./script.js"></script>
   </body>
 </html>
-

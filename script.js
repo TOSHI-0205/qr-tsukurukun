@@ -4,11 +4,21 @@
 
   ポイント：
   - QR生成は qr-code-styling を使用（ロゴ、色、形状変更が簡単）
-  - QR読み取りは html5-qrcode を使用（スマホのカメラ対応）
+  - 通常QR：入力したURLをそのままQR化
+  - 可変QR：go.html?id=xxx の固定URLをQR化（links.json で転送先を管理）
 */
 
 // ===== DOM取得（画面の部品） =====
 const el = {
+  // モード切替
+  modeNormal: document.getElementById("modeNormal"),
+  modeVariable: document.getElementById("modeVariable"),
+  normalQrSection: document.getElementById("normalQrSection"),
+  variableQrSection: document.getElementById("variableQrSection"),
+  variableId: document.getElementById("variableId"),
+  variableQrUrl: document.getElementById("variableQrUrl"),
+
+  // QR入力
   qrText: document.getElementById("qrText"),
   qrSize: document.getElementById("qrSize"),
   errorCorrection: document.getElementById("errorCorrection"),
@@ -33,15 +43,6 @@ const el = {
   qrPreview: document.getElementById("qrPreview"),
   downloadPngBtn: document.getElementById("downloadPngBtn"),
   status: document.getElementById("status"),
-
-  // scanner
-  qrReader: document.getElementById("qrReader"),
-  startScanBtn: document.getElementById("startScanBtn"),
-  stopScanBtn: document.getElementById("stopScanBtn"),
-  scanResultText: document.getElementById("scanResultText"),
-  useScanResultBtn: document.getElementById("useScanResultBtn"),
-  copyScanResultBtn: document.getElementById("copyScanResultBtn"),
-  scanStatus: document.getElementById("scanStatus"),
 };
 
 // ===== 小さなユーティリティ =====
@@ -49,15 +50,33 @@ function setStatus(message) {
   el.status.textContent = message || "";
 }
 
-/** カメラ読み取りエリア用（画面上でその場に表示。HTTPS・権限の案内もここへ） */
-function setScanStatus(message, isError) {
-  if (!el.scanStatus) return;
-  el.scanStatus.textContent = message || "";
-  el.scanStatus.classList.toggle("scanStatus--error", Boolean(isError && message));
-}
-
 function clamp(n, min, max) {
   return Math.min(max, Math.max(min, n));
+}
+
+// ===== モード管理（通常QR / 可変QR） =====
+let currentMode = "normal"; // "normal" | "variable"
+
+function switchMode(mode) {
+  currentMode = mode;
+  const isVariable = mode === "variable";
+  el.normalQrSection.hidden = isVariable;
+  el.variableQrSection.hidden = !isVariable;
+  el.modeNormal.classList.toggle("modeBtn--active", !isVariable);
+  el.modeVariable.classList.toggle("modeBtn--active", isVariable);
+  el.modeNormal.setAttribute("aria-selected", String(!isVariable));
+  el.modeVariable.setAttribute("aria-selected", String(isVariable));
+  updateQrPreview();
+}
+
+/**
+ * 可変QR用リダイレクトURL（go.html?id=xxx）を組み立てる
+ * 現在のページと同じディレクトリにある go.html を使う
+ */
+function getVariableQrUrl(id) {
+  // "index.html" や末尾のファイル名を除いてディレクトリパスを取る
+  const base = location.href.replace(/\/[^/?#]*(\?.*)?$/, "/");
+  return base + "go.html?id=" + encodeURIComponent(id);
 }
 
 // ===== プリセットロゴ（data URL） =====
@@ -223,7 +242,6 @@ function getLogoImageUrl() {
 
 function readUiState() {
   const size = Number(el.qrSize.value) || 280;
-  const data = (el.qrText.value || "").trim();
   const errorCorrectionLevel = el.errorCorrection.value || "H";
 
   const dotType = el.dotStyle.value || "rounded";
@@ -236,8 +254,23 @@ function readUiState() {
 
   const logoSizePercent = clamp(Number(el.logoSize.value) || 20, 0, 60);
   const logoMarginPx = clamp(Number(el.logoMargin.value) || 12, 0, 30);
-
   const logoImageUrl = logoSizePercent > 0 ? getLogoImageUrl() : null;
+
+  // モードによって QR のデータ元を切り替える
+  let data;
+  if (currentMode === "variable") {
+    const id = (el.variableId.value || "").trim();
+    if (id) {
+      const url = getVariableQrUrl(id);
+      data = url;
+      el.variableQrUrl.textContent = url;
+    } else {
+      data = "";
+      el.variableQrUrl.textContent = "（IDを入力してください）";
+    }
+  } else {
+    data = (el.qrText.value || "").trim();
+  }
 
   return {
     size,
@@ -385,266 +418,15 @@ async function downloadPng() {
   }
 }
 
-// ===== 読み取り（カメラ） =====
-let html5Qr = null;
-let isScanning = false;
-let lastScanText = "";
-/** 起動処理の連打防止（非同期のあいだも二度押ししない） */
-let scanBusy = false;
-
-function setScanResult(text) {
-  lastScanText = text || "";
-  if (!lastScanText) {
-    el.scanResultText.textContent = "まだ読み取り結果はありません。";
-    el.useScanResultBtn.disabled = true;
-    el.copyScanResultBtn.disabled = true;
-    return;
-  }
-  el.scanResultText.textContent = lastScanText;
-  el.useScanResultBtn.disabled = false;
-  el.copyScanResultBtn.disabled = false;
-}
-
-/** スキャン失敗時に中身を掃除（連続で別カメラを試すときに必要） */
-async function resetScannerUi() {
-  if (!html5Qr) return;
-  try {
-    await html5Qr.stop();
-  } catch (_) {
-    /* 未起動ならここは失敗して問題ない */
-  }
-  try {
-    html5Qr.clear();
-  } catch (_) {
-    /* 古い環境で無い場合もある */
-  }
-}
-
-/** ブラウザから返るエラーを日本語で簡潔に */
-function describeScannerError(err) {
-  const name = err && err.name;
-  const msg = (err && err.message) || "";
-
-  if (name === "NotAllowedError" || /permission/i.test(msg)) {
-    return "カメラの使用が拒否されました。アドレスバーの鍵アイコン／サイトの設定で、このサイトのカメラを「許可」にしてください。";
-  }
-  if (name === "NotFoundError" || name === "DevicesNotFoundError") {
-    return "カメラが見つかりません。外付けカメラの場合は接続を確認してください。";
-  }
-  if (name === "NotReadableError" || name === "TrackStartError") {
-    return "カメラが他のアプリで使用中か、読み取りできませんでした。ほかのアプリを閉じてから再度お試しください。";
-  }
-  if (name === "OverconstrainedError") {
-    return "この端末では指定したカメラ設定が使えませんでした。別のブラウザや更新で試してください。";
-  }
-  if (name === "AbortError") {
-    return "カメラの起動が中断されました。もう一度「スキャン開始」を押してください。";
-  }
-  if (name === "SecurityError" || /secure context/i.test(msg)) {
-    return "セキュリティ制限でカメラを使えません。HTTPSのURL（GitHub Pages の https://〜）で開いてください。";
-  }
-
-  const short = msg.length > 120 ? `${msg.slice(0, 120)}…` : msg;
-  return short ? `カメラを開始できませんでした（${short}）` : "カメラを開始できませんでした。";
-}
-
-function buildScannerConfig() {
-  const narrow = (window.innerWidth || 800) <= 768;
-  return {
-    fps: 10,
-    // ビューファインダ実寸に合わせる（固定サイズが大きすぎると iPhone 等で start が失敗することがある）
-    qrbox: (viewfinderWidth, viewfinderHeight) => {
-      const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
-      const side = Math.max(140, Math.floor(minEdge * 0.72));
-      return { width: side, height: side };
-    },
-    // スマホカメラは縦動画が多く、1.0 だと内部エラーになることがある
-    aspectRatio: narrow ? 1.777778 : 1.333333,
-    disableFlip: false,
-  };
-}
-
-async function startScan() {
-  if (isScanning || scanBusy) return;
-  scanBusy = true;
-
-  // ボタン押下の即時フィードバック（ここが最初に表示される）
-  setScanStatus("スキャン準備中…", false);
-
-  const resetButtonsFail = () => {
-    el.startScanBtn.disabled = false;
-    el.stopScanBtn.disabled = true;
-  };
-
-  try {
-    setScanResult("");
-
-    if (typeof Html5Qrcode === "undefined") {
-      setScanStatus(
-        "読み取りライブラリ（html5-qrcode）が読み込めていません。ページを再読み込みするか、通信・広告ブロックを確認してください。",
-        true
-      );
-      return;
-    }
-
-    // GitHub Pages は HTTPS なので通常 true。file:// ではカメラが使えないことが多い。
-    if (!window.isSecureContext) {
-      setScanStatus(
-        "この環境ではカメラを安全に使えません（セキュアなコンテキストではありません）。GitHub Pages の https:// から開いてください。",
-        true
-      );
-      return;
-    }
-
-    setScanStatus("カメラを初期化しています…", false);
-
-    if (!html5Qr) {
-      try {
-        html5Qr = new Html5Qrcode("qrReader", { verbose: false });
-      } catch (initErr) {
-        setScanStatus(
-          "カメラの初期化に失敗しました。ページを再読み込みして再度お試しください。（" +
-            (initErr && initErr.message ? initErr.message : String(initErr)) +
-            "）",
-          true
-        );
-        console.error("Html5Qrcode init error:", initErr);
-        return;
-      }
-    }
-
-    el.startScanBtn.disabled = true;
-    el.stopScanBtn.disabled = false;
-
-    setScanStatus(
-      "カメラの許可を求めています。ダイアログが出たら「許可」を選んでください。",
-      false
-    );
-
-    const config = buildScannerConfig();
-    const onDecoded = (decodedText) => {
-      if (decodedText && decodedText !== lastScanText) {
-        setScanResult(decodedText);
-      }
-    };
-    const onScanFailure = () => {};
-
-    let lastErr = null;
-
-    /** 列挙できたカメラ ID で開始（iPhone / Android で facingMode より安定することが多い） */
-    async function tryStartWithListedCameras() {
-      const cameras = await Html5Qrcode.getCameras();
-      if (!cameras || !cameras.length) return false;
-      const preferred =
-        cameras.find((c) => /back|rear|wide|外|背面|environment/i.test(c.label)) ||
-        cameras[cameras.length - 1];
-      setScanStatus("カメラを起動中…", false);
-      await html5Qr.start(preferred.id, config, onDecoded, onScanFailure);
-      return true;
-    }
-
-    // 1) 最初から一覧が取れる環境
-    try {
-      if (await tryStartWithListedCameras()) {
-        isScanning = true;
-        setScanStatus("読み取り開始しました。QRコードを枠の中に入れてください。", false);
-        return;
-      }
-    } catch (e) {
-      lastErr = e;
-    }
-
-    await resetScannerUi();
-
-    // 2) facingMode（許可ダイアログが出やすい）。固定 qrbox より可変 qrbox の方が失敗しにくい
-    const attempts = [{ facingMode: "environment" }, { facingMode: "user" }];
-    for (let i = 0; i < attempts.length; i += 1) {
-      if (i > 0) await resetScannerUi();
-      setScanStatus(
-        "カメラを起動中…（" + (i === 0 ? "背面カメラ" : "前面カメラ") + "）",
-        false
-      );
-      try {
-        await html5Qr.start(attempts[i], config, onDecoded, onScanFailure);
-        isScanning = true;
-        setScanStatus("読み取り開始しました。QRコードを枠の中に入れてください。", false);
-        return;
-      } catch (e) {
-        lastErr = e;
-      }
-    }
-
-    await resetScannerUi();
-
-    // 3) 許可後にだけカメラ一覧が埋まる端末向けにもう一度 ID 指定を試す
-    setScanStatus("カメラを再検索しています…", false);
-    try {
-      if (await tryStartWithListedCameras()) {
-        isScanning = true;
-        setScanStatus("読み取り開始しました。QRコードを枠の中に入れてください。", false);
-        return;
-      }
-      lastErr = lastErr || new Error("利用できるカメラがありません");
-    } catch (e) {
-      lastErr = e;
-    }
-
-    isScanning = false;
-    resetButtonsFail();
-    setScanResult("");
-    setScanStatus(describeScannerError(lastErr), true);
-    console.error(lastErr);
-  } catch (unexpected) {
-    isScanning = false;
-    resetButtonsFail();
-    setScanStatus(
-      "予期しないエラーが発生しました。" + describeScannerError(unexpected),
-      true
-    );
-    console.error(unexpected);
-  } finally {
-    scanBusy = false;
-  }
-}
-
-async function stopScan() {
-  if (!html5Qr || !isScanning) return;
-  try {
-    await html5Qr.stop();
-  } catch (e) {
-    console.error(e);
-  } finally {
-    isScanning = false;
-    el.startScanBtn.disabled = false;
-    el.stopScanBtn.disabled = true;
-    setScanStatus("", false);
-  }
-}
-
-async function copyScanResult() {
-  if (!lastScanText) return;
-  try {
-    await navigator.clipboard.writeText(lastScanText);
-    setStatus("読み取り結果をコピーしました。");
-  } catch {
-    // clipboard が使えない場合のフォールバック（選択できるように）
-    setStatus("コピーできませんでした。内容を長押ししてコピーしてください。");
-  }
-}
-
-function useScanResult() {
-  if (!lastScanText) return;
-  el.qrText.value = lastScanText;
-  updateQrPreview();
-  // 入力セクションが見える位置へ軽く誘導
-  el.qrText.scrollIntoView({ behavior: "smooth", block: "center" });
-  setStatus("読み取り結果を入力欄に反映しました。");
-}
-
 // ===== イベント（操作したら更新） =====
 const updateEvents = ["input", "change"];
 const bindUpdate = (node) => updateEvents.forEach((ev) => node.addEventListener(ev, updateQrPreview));
 
+// モード切替
+el.modeNormal.addEventListener("click", () => switchMode("normal"));
+el.modeVariable.addEventListener("click", () => switchMode("variable"));
+
+// QR入力系
 bindUpdate(el.qrText);
 bindUpdate(el.qrSize);
 bindUpdate(el.errorCorrection);
@@ -657,6 +439,7 @@ bindUpdate(el.quietZone);
 bindUpdate(el.presetLogo);
 bindUpdate(el.logoSize);
 bindUpdate(el.logoMargin);
+bindUpdate(el.variableId);
 
 el.logoUpload.addEventListener("change", async () => {
   // 以前アップロードした Data URL だけ破棄（input を空にしない＝今選んだファイルを残す）
@@ -689,25 +472,6 @@ el.clearLogoBtn.addEventListener("click", () => {
 
 el.downloadPngBtn.addEventListener("click", downloadPng);
 
-// scanner buttons
-el.startScanBtn.addEventListener("click", startScan);
-el.stopScanBtn.addEventListener("click", stopScan);
-el.useScanResultBtn.addEventListener("click", useScanResult);
-el.copyScanResultBtn.addEventListener("click", copyScanResult);
-
-// ページを閉じる/移動する時にカメラを止める（安全のため）
-window.addEventListener("beforeunload", () => {
-  stopScan();
-});
-
-// CDN からライブラリが読み込めなかったときの案内（ここで早期に気づけるようにする）
-if (typeof Html5Qrcode === "undefined") {
-  setScanStatus(
-    "読み取りライブラリ（html5-qrcode）が読み込めていません。ページを再読み込みするか、通信・広告ブロックを確認してください。",
-    true
-  );
-  el.startScanBtn.disabled = true;
-}
 if (typeof QRCodeStyling === "undefined") {
   setStatus("QR生成ライブラリが読み込めていません。ページを再読み込みしてください。");
 }
@@ -715,4 +479,3 @@ if (typeof QRCodeStyling === "undefined") {
 // 初期表示
 syncRangeLabels();
 updateQrPreview();
-
