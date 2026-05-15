@@ -4,7 +4,7 @@
 
   ポイント：
   - QR生成は qr-code-styling を使用（ロゴ、色、形状変更が簡単）
-  - 通常QR：入力したURLをそのままQR化
+  - 通常QR：入力したURLをそのままQR化。入力内容を保存・再利用できる
   - 可変QR：go.html?id=xxx の固定URLをQR化。リンクは localStorage で管理
 */
 
@@ -15,6 +15,12 @@ const el = {
   modeVariable: document.getElementById("modeVariable"),
   normalQrSection: document.getElementById("normalQrSection"),
   variableQrSection: document.getElementById("variableQrSection"),
+
+  // 通常QR 入力保存
+  saveNormalBtn: document.getElementById("saveNormalBtn"),
+  saveNormalStatus: document.getElementById("saveNormalStatus"),
+  normalHistoryWrap: document.getElementById("normalHistoryWrap"),
+  normalHistoryList: document.getElementById("normalHistoryList"),
 
   // 可変QR リンク管理フォーム
   linkFormTitle: document.getElementById("linkFormTitle"),
@@ -77,6 +83,13 @@ function escHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
+/** タイムスタンプ（ms）を「YYYY/MM/DD HH:MM」形式に変換 */
+function formatDate(ts) {
+  const d = new Date(ts);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 // ===== モード管理（通常QR / 可変QR） =====
 let currentMode = "normal"; // "normal" | "variable"
 
@@ -102,9 +115,13 @@ function getVariableQrUrl(id) {
   return base + "go.html?id=" + encodeURIComponent(id);
 }
 
-// ===== localStorage リンク管理 =====
-const LINKS_STORAGE_KEY = "qrtsLinks";
+// ===== localStorage キーと上限 =====
+const LINKS_STORAGE_KEY      = "qrtsLinks";           // 可変QR リンク（go.html が読む）
+const LINK_TIMESTAMPS_KEY    = "qrtsLinksTimestamps"; // 可変QR 登録日時
+const NORMAL_HISTORY_KEY     = "qrtsNormalHistory";   // 通常QR 入力履歴
+const MAX_NORMAL_HISTORY     = 20;                    // 通常QR 履歴の最大件数
 
+// ===== 可変QR: localStorage リンク管理 =====
 function loadLinks() {
   try {
     const raw = localStorage.getItem(LINKS_STORAGE_KEY);
@@ -124,7 +141,24 @@ function saveLinks(links) {
   }
 }
 
-// ===== リンク一覧の表示 =====
+function loadLinkTimestamps() {
+  try {
+    const raw = localStorage.getItem(LINK_TIMESTAMPS_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveLinkTimestamps(timestamps) {
+  try {
+    localStorage.setItem(LINK_TIMESTAMPS_KEY, JSON.stringify(timestamps));
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+// ===== 可変QR: リンク一覧の表示 =====
 /** 現在 QR化しているリンク ID（null なら未選択） */
 let variableSelectedId = null;
 
@@ -133,6 +167,7 @@ let varLinkEditingId = null;
 
 function renderLinkList() {
   const links = loadLinks();
+  const timestamps = loadLinkTimestamps();
   const ids = Object.keys(links);
   const container = el.varLinkList;
 
@@ -147,16 +182,21 @@ function renderLinkList() {
   for (const id of ids) {
     const url = links[id];
     const isActive = id === variableSelectedId;
+    const ts = timestamps[id];
+    const dateHtml = ts
+      ? `<div class="linkItem__date">${escHtml(formatDate(ts))}</div>`
+      : "";
+
     const item = document.createElement("div");
     item.className = "linkItem" + (isActive ? " linkItem--active" : "");
-
     item.innerHTML = `
       <div class="linkItem__info">
         <div class="linkItem__id">${escHtml(id)}</div>
         <div class="linkItem__url">${escHtml(url)}</div>
+        ${dateHtml}
       </div>
       <div class="linkItem__actions">
-        <button class="btn btn--primary btn--sm" data-action="qr" data-id="${escHtml(id)}" type="button">QR作成</button>
+        <button class="btn btn--primary btn--sm" data-action="qr" data-id="${escHtml(id)}" type="button">QRを再生成</button>
         <button class="btn btn--ghost btn--sm" data-action="edit" data-id="${escHtml(id)}" type="button">編集</button>
         <button class="btn btn--ghost btn--sm btn--danger" data-action="delete" data-id="${escHtml(id)}" type="button">削除</button>
       </div>
@@ -170,7 +210,6 @@ function renderLinkList() {
 /** 「QR作成中」インジケーターを更新する */
 function refreshActiveInfo(links) {
   if (!variableSelectedId || !links[variableSelectedId]) {
-    // 選択中 ID が消えていたらリセット
     if (variableSelectedId && !links[variableSelectedId]) {
       variableSelectedId = null;
       updateQrPreview();
@@ -183,7 +222,7 @@ function refreshActiveInfo(links) {
   el.varQrActiveInfo.hidden = false;
 }
 
-// ===== リンク登録・編集・削除 =====
+// ===== 可変QR: リンク登録・編集・削除 =====
 
 /** 登録 / 更新ボタンの処理 */
 function handleSaveLink() {
@@ -213,8 +252,9 @@ function handleSaveLink() {
   }
 
   const links = loadLinks();
+  const timestamps = loadLinkTimestamps();
 
-  // 新規登録で同じ ID が既に存在する場合（編集中に自分と同じ ID は上書き OK）
+  // 新規登録で同じ ID が既に存在する場合
   if (!varLinkEditingId && links[id]) {
     el.varLinkFormStatus.textContent = `ID「${id}」はすでに登録されています。別のIDを使うか、一覧から編集してください。`;
     el.varLinkId.focus();
@@ -230,13 +270,14 @@ function handleSaveLink() {
   // 編集中にIDを変更した場合は古いエントリを削除
   if (varLinkEditingId && varLinkEditingId !== id) {
     delete links[varLinkEditingId];
-    if (variableSelectedId === varLinkEditingId) {
-      variableSelectedId = id;
-    }
+    delete timestamps[varLinkEditingId];
+    if (variableSelectedId === varLinkEditingId) variableSelectedId = id;
   }
 
   links[id] = url;
+  timestamps[id] = Date.now();
   saveLinks(links);
+  saveLinkTimestamps(timestamps);
 
   el.varLinkFormStatus.textContent = "";
   resetLinkForm();
@@ -274,26 +315,129 @@ function startEditLink(id) {
 /** 一覧の「削除」を押したとき */
 function deleteLink(id) {
   if (!confirm(`「${id}」を削除しますか？\nこのリンクのQRコードは使えなくなります。`)) return;
+
   const links = loadLinks();
+  const timestamps = loadLinkTimestamps();
   delete links[id];
+  delete timestamps[id];
   saveLinks(links);
+  saveLinkTimestamps(timestamps);
+
   if (variableSelectedId === id) {
     variableSelectedId = null;
     updateQrPreview();
   }
-  if (varLinkEditingId === id) {
-    resetLinkForm();
-  }
+  if (varLinkEditingId === id) resetLinkForm();
   renderLinkList();
 }
 
-/** 一覧の「QR作成」を押したとき */
+/** 一覧の「QRを再生成」を押したとき */
 function selectLinkForQr(id) {
   variableSelectedId = id;
   updateQrPreview();
   renderLinkList();
-  // STEP 3 のプレビューへスクロール
   el.qrPreview.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+// ===== 通常QR: 入力履歴 =====
+
+function loadNormalHistory() {
+  try {
+    const raw = localStorage.getItem(NORMAL_HISTORY_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveNormalHistoryData(items) {
+  try {
+    localStorage.setItem(NORMAL_HISTORY_KEY, JSON.stringify(items));
+  } catch (e) {
+    console.error("localStorage の書き込みに失敗しました", e);
+  }
+}
+
+/** 「この入力を保存」ボタンの処理 */
+function saveCurrentNormalInput() {
+  const text = (el.qrText.value || "").trim();
+  if (!text) {
+    el.saveNormalStatus.textContent = "内容を入力してから保存してください。";
+    setTimeout(() => { el.saveNormalStatus.textContent = ""; }, 2500);
+    return;
+  }
+
+  const items = loadNormalHistory();
+  const savedAt = Date.now();
+
+  // 同じテキストが既にある場合は先頭へ移動して日時を更新
+  const existingIdx = items.findIndex((item) => item.text === text);
+  if (existingIdx !== -1) {
+    items[existingIdx].savedAt = savedAt;
+    items.unshift(items.splice(existingIdx, 1)[0]);
+  } else {
+    items.unshift({ id: String(savedAt), text, savedAt });
+  }
+
+  // 上限を超えた古いものを削除
+  if (items.length > MAX_NORMAL_HISTORY) items.splice(MAX_NORMAL_HISTORY);
+
+  saveNormalHistoryData(items);
+  el.saveNormalStatus.textContent = "保存しました。";
+  setTimeout(() => { el.saveNormalStatus.textContent = ""; }, 2500);
+  renderNormalHistory();
+}
+
+/** 保存済み一覧を再描画する */
+function renderNormalHistory() {
+  const items = loadNormalHistory();
+
+  if (items.length === 0) {
+    el.normalHistoryWrap.hidden = true;
+    return;
+  }
+
+  el.normalHistoryWrap.hidden = false;
+  el.normalHistoryList.innerHTML = "";
+
+  for (const item of items) {
+    const preview = item.text.length > 55 ? item.text.slice(0, 55) + "…" : item.text;
+    const div = document.createElement("div");
+    div.className = "historyItem";
+    div.innerHTML = `
+      <div class="historyItem__info">
+        <div class="historyItem__text">${escHtml(preview)}</div>
+        <div class="historyItem__date">${escHtml(formatDate(item.savedAt))}</div>
+      </div>
+      <div class="historyItem__actions">
+        <button class="btn btn--primary btn--sm" data-action="restore-normal" data-id="${escHtml(item.id)}" type="button">QRを再生成</button>
+        <button class="btn btn--ghost btn--sm btn--danger" data-action="delete-normal" data-id="${escHtml(item.id)}" type="button">削除</button>
+      </div>
+    `;
+    el.normalHistoryList.appendChild(div);
+  }
+}
+
+/** 保存済み一覧の「QRを再生成」を押したとき */
+function restoreNormalQr(id) {
+  const items = loadNormalHistory();
+  const item = items.find((i) => i.id === id);
+  if (!item) return;
+  el.qrText.value = item.text;
+  updateQrPreview();
+  el.qrPreview.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+/** 保存済み一覧の「削除」を押したとき */
+function deleteNormalHistory(id) {
+  const items = loadNormalHistory();
+  const idx = items.findIndex((i) => i.id === id);
+  if (idx === -1) return;
+  items.splice(idx, 1);
+  saveNormalHistoryData(items);
+  renderNormalHistory();
 }
 
 // ===== プリセットロゴ（data URL） =====
@@ -494,7 +638,7 @@ function updateQrPreview() {
   if (!hasData) {
     setStatus(
       currentMode === "variable"
-        ? "一覧から「QR作成」を押すとQRが表示されます。"
+        ? "一覧から「QRを再生成」を押すとQRが表示されます。"
         : "内容を入力するとQRが表示されます。"
     );
   } else {
@@ -551,7 +695,7 @@ function downloadBlobAsFile(blob, filename) {
 async function downloadPng() {
   const s = readUiState();
   if (!s.data.trim()) {
-    setStatus("先に内容を入力（または QR作成ボタンを押）してください。");
+    setStatus("先に内容を入力（または「QRを再生成」）してください。");
     return;
   }
 
@@ -615,7 +759,19 @@ const bindUpdate = (node) => updateEvents.forEach((ev) => node.addEventListener(
 el.modeNormal.addEventListener("click", () => switchMode("normal"));
 el.modeVariable.addEventListener("click", () => switchMode("variable"));
 
-// 可変QR フォーム操作
+// 通常QR: 入力保存ボタン
+el.saveNormalBtn.addEventListener("click", saveCurrentNormalInput);
+
+// 通常QR: 保存済み一覧のボタン（イベント委譲）
+el.normalHistoryList.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-action]");
+  if (!btn) return;
+  const { action, id } = btn.dataset;
+  if (action === "restore-normal") restoreNormalQr(id);
+  else if (action === "delete-normal") deleteNormalHistory(id);
+});
+
+// 可変QR: フォーム操作
 el.varLinkSaveBtn.addEventListener("click", handleSaveLink);
 el.varLinkCancelBtn.addEventListener("click", resetLinkForm);
 
@@ -626,12 +782,11 @@ el.varLinkCancelBtn.addEventListener("click", resetLinkForm);
   });
 });
 
-// リンク一覧のボタン（イベント委譲）
+// 可変QR: リンク一覧のボタン（イベント委譲）
 el.varLinkList.addEventListener("click", (e) => {
   const btn = e.target.closest("[data-action]");
   if (!btn) return;
-  const action = btn.dataset.action;
-  const id = btn.dataset.id;
+  const { action, id } = btn.dataset;
   if (action === "qr") selectLinkForQr(id);
   else if (action === "edit") startEditLink(id);
   else if (action === "delete") deleteLink(id);
@@ -685,6 +840,7 @@ if (typeof QRCodeStyling === "undefined") {
   setStatus("QR生成ライブラリが読み込めていません。ページを再読み込みしてください。");
 }
 
-// 初期表示
+// ===== 初期表示 =====
 syncRangeLabels();
 updateQrPreview();
+renderNormalHistory(); // 保存済み通常QR履歴を表示

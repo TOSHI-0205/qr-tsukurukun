@@ -53,6 +53,18 @@
             ></textarea>
             <div class="help">空のときはQRを作れません。URLでも文章でもOKです。</div>
           </div>
+          <div class="saveRow">
+            <button id="saveNormalBtn" class="btn btn--ghost btn--sm" type="button">この入力を保存</button>
+            <span id="saveNormalStatus" class="saveStatus" aria-live="polite"></span>
+          </div>
+          <!-- 保存済み一覧（保存データがあるときだけ表示） -->
+          <div id="normalHistoryWrap" hidden>
+            <div class="historyHeader">
+              <span class="label">保存済み一覧</span>
+              <span class="historyHeaderNote">このブラウザ内のみ有効</span>
+            </div>
+            <div id="normalHistoryList" class="historyList"></div>
+          </div>
         </div>
 
         <!-- 可変QR -->
