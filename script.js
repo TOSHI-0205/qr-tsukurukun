@@ -16,7 +16,11 @@ const el = {
   normalQrSection: document.getElementById("normalQrSection"),
   variableQrSection: document.getElementById("variableQrSection"),
   variableId: document.getElementById("variableId"),
+  variableUrl: document.getElementById("variableUrl"),
   variableQrUrl: document.getElementById("variableQrUrl"),
+  variableLinkEntry: document.getElementById("variableLinkEntry"),
+  variableChangeNote: document.getElementById("variableChangeNote"),
+  variableIdRef: document.getElementById("variableIdRef"),
 
   // QR入力
   qrText: document.getElementById("qrText"),
@@ -260,13 +264,26 @@ function readUiState() {
   let data;
   if (currentMode === "variable") {
     const id = (el.variableId.value || "").trim();
+    const destUrl = (el.variableUrl.value || "").trim();
+
     if (id) {
-      const url = getVariableQrUrl(id);
-      data = url;
-      el.variableQrUrl.textContent = url;
+      const redirectUrl = getVariableQrUrl(id);
+      data = redirectUrl;
+      el.variableQrUrl.textContent = redirectUrl;
+      // links.json に追加する行のプレビュー
+      if (destUrl) {
+        el.variableLinkEntry.textContent = `"${id}": "${destUrl}"`;
+      } else {
+        el.variableLinkEntry.textContent = `"${id}": "（② 飛び先URLを入力してください）"`;
+      }
+      // 「あとから変えたい場合」の注記
+      el.variableIdRef.textContent = `"${id}"`;
+      el.variableChangeNote.hidden = false;
     } else {
       data = "";
-      el.variableQrUrl.textContent = "（IDを入力してください）";
+      el.variableQrUrl.textContent = "（① IDを入力してください）";
+      el.variableLinkEntry.textContent = "（① IDと② 飛び先URLを入力してください）";
+      el.variableChangeNote.hidden = true;
     }
   } else {
     data = (el.qrText.value || "").trim();
@@ -440,6 +457,7 @@ bindUpdate(el.presetLogo);
 bindUpdate(el.logoSize);
 bindUpdate(el.logoMargin);
 bindUpdate(el.variableId);
+bindUpdate(el.variableUrl);
 
 el.logoUpload.addEventListener("change", async () => {
   // 以前アップロードした Data URL だけ破棄（input を空にしない＝今選んだファイルを残す）
