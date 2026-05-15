@@ -23,7 +23,7 @@
       border-radius: 20px;
       box-shadow: 0 10px 30px rgba(17, 24, 39, 0.08);
       padding: 40px 32px;
-      max-width: 440px;
+      max-width: 460px;
       width: 100%;
       text-align: center;
     }
@@ -37,8 +37,8 @@
       margin: 0 auto 20px;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
-    h1 { font-size: 18px; font-weight: 800; color: #111827; margin-bottom: 8px; }
-    p { font-size: 14px; color: #6b7280; line-height: 1.6; margin-top: 6px; }
+    h1 { font-size: 18px; font-weight: 800; color: #111827; margin-bottom: 10px; }
+    p { font-size: 14px; color: #6b7280; line-height: 1.7; margin-top: 6px; }
     code {
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
       font-size: 12px;
@@ -46,23 +46,35 @@
       border-radius: 4px;
       padding: 1px 5px;
     }
-    .url {
+    .dest-url {
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
       font-size: 12px;
       color: var(--primary);
       word-break: break-all;
       margin-top: 8px;
+      display: block;
     }
-    .err-icon { font-size: 36px; margin-bottom: 12px; }
+    .err-icon { font-size: 36px; margin-bottom: 14px; }
     .back {
       display: inline-block;
-      margin-top: 20px;
+      margin-top: 22px;
       font-size: 14px;
       color: var(--primary);
       text-decoration: none;
       font-weight: 600;
     }
     .back:hover { text-decoration: underline; }
+    .note {
+      margin-top: 14px;
+      padding: 12px 14px;
+      background: #fffbeb;
+      border: 1px solid #fcd34d;
+      border-radius: 10px;
+      font-size: 13px;
+      color: #78350f;
+      text-align: left;
+      line-height: 1.65;
+    }
   </style>
 </head>
 <body>
@@ -73,15 +85,18 @@
   </div>
 
   <script>
-  (async () => {
+  (function () {
     'use strict';
 
-    const id = new URLSearchParams(location.search).get('id') || '';
-    const spinner = document.getElementById('spinner');
-    const title = document.getElementById('title');
-    const desc = document.getElementById('desc');
+    var LINKS_KEY = 'qrtsLinks';
+    var id = new URLSearchParams(location.search).get('id') || '';
 
-    /** テキストをHTMLエスケープする（XSS防止） */
+    var spinner = document.getElementById('spinner');
+    var title   = document.getElementById('title');
+    var desc    = document.getElementById('desc');
+    var card    = document.getElementById('card');
+
+    /** テキストを HTML にそのまま差し込むときに使う（XSS防止） */
     function esc(s) {
       return String(s)
         .replace(/&/g, '&amp;')
@@ -90,47 +105,69 @@
         .replace(/"/g, '&quot;');
     }
 
-    function showError(heading, detailHtml) {
+    function showError(heading, bodyHtml, showLocalStorageNote) {
       spinner.style.display = 'none';
+      card.insertAdjacentHTML('afterbegin', '<div class="err-icon">⚠️</div>');
       title.textContent = heading;
-      desc.innerHTML = detailHtml + '<br><a class="back" href="./">QRつくるくんへ戻る</a>';
+      desc.innerHTML = bodyHtml;
+      if (showLocalStorageNote) {
+        var note = document.createElement('div');
+        note.className = 'note';
+        note.innerHTML =
+          '<strong>このQRコードについて</strong><br>' +
+          'このQRコードは <strong>QRつくるくん</strong> の「可変QR」機能で作成されています。' +
+          'リンクデータはブラウザの localStorage に保存されているため、' +
+          '<strong>登録した端末・ブラウザと同じ環境</strong>でのみ転送が可能です。<br>' +
+          '<a class="back" href="./">QRつくるくんへ戻る</a>';
+        card.appendChild(note);
+      } else {
+        desc.innerHTML += '<br><a class="back" href="./">QRつくるくんへ戻る</a>';
+      }
     }
 
+    // ID が指定されていない
     if (!id) {
       showError(
         'IDが指定されていません',
-        'URLに <code>?id=●●</code> が必要です。QRつくるくんで可変QRを作り直してください。'
+        'URLに <code>?id=●●</code> が必要です。QRつくるくんで可変QRを作り直してください。',
+        false
       );
       return;
     }
 
+    // localStorage からリンクを検索
+    var links = {};
     try {
-      const res = await fetch('./links.json', { cache: 'no-cache' });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const links = await res.json();
-      const url = links[id];
-
-      if (!url) {
-        showError(
-          '転送先が見つかりません',
-          '<code>' + esc(id) + '</code> に対応するURLが <code>links.json</code> にありません。ファイルを確認してください。'
-        );
-        return;
-      }
-
-      // 転送先URLを表示してから移動（ユーザーに行き先を一瞬見せる）
-      title.textContent = '転送中...';
-      desc.innerHTML = '<span class="url">' + esc(url) + '</span>';
-
-      location.replace(url);
+      var raw = localStorage.getItem(LINKS_KEY);
+      if (raw) links = JSON.parse(raw);
     } catch (e) {
+      // localStorage が使えない環境（プライベートブラウズ等）
       showError(
-        'links.json を読み込めません',
-        'ファイルが存在するか、同じフォルダに置いてあるか確認してください。'
+        'データを読み込めません',
+        'このブラウザでは localStorage が使用できません。',
+        true
       );
-      console.error(e);
+      return;
     }
-  })();
+
+    var url = links && links[id];
+
+    // ID に対応する URL が見つからない
+    if (!url) {
+      showError(
+        '転送先が見つかりません',
+        '<code>' + esc(id) + '</code> に対応するURLが登録されていません。',
+        true
+      );
+      return;
+    }
+
+    // 転送先 URL を一瞬表示してから移動
+    title.textContent = '転送中...';
+    desc.innerHTML = '<span class="dest-url">' + esc(url) + '</span>';
+    location.replace(url);
+
+  }());
   </script>
 </body>
 </html>

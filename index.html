@@ -57,53 +57,65 @@
 
         <!-- 可変QR -->
         <div id="variableQrSection" hidden>
-          <div class="infoBox">
-            <strong>可変QRとは？</strong><br>
-            QRには「転送ページのURL」を入れておき、実際の飛び先は <code>links.json</code> で管理します。<br>
-            QRを印刷した後でも <strong>links.json を書き換えるだけで飛び先を変えられます</strong>。QRの刷り直し不要です。
+
+          <!-- ⚠️ localStorage の制限説明 -->
+          <div class="infoBox infoBox--warn">
+            <strong>⚠️ 同じ端末・同じブラウザ内でのみ動作します</strong><br>
+            リンクはこのブラウザの localStorage に保存されます。<strong>QRを読み取るのも登録した端末・ブラウザと同じ環境</strong>である必要があります。<br>
+            <span class="infoBox__sub">不特定多数の方が別の端末でスキャンする用途には、サーバーにリンクを保存する仕組みが別途必要です（将来的な機能予定）。</span>
           </div>
 
-          <div class="grid2">
-            <div class="formRow">
-              <label class="label" for="variableId">① ID（半角英数字・ハイフン）</label>
-              <input
-                id="variableId"
-                class="input"
-                type="text"
-                placeholder="例）youtube"
-                autocomplete="off"
-                spellcheck="false"
-              />
-              <div class="help">QRに埋め込む識別子です。短くシンプルな名前がおすすめです。</div>
+          <!-- リンク登録フォーム -->
+          <div class="linkForm">
+            <div class="linkForm__title" id="linkFormTitle">リンクを登録する</div>
+            <div class="grid2">
+              <div class="formRow">
+                <label class="label" for="varLinkId">ID（半角英数字・ハイフン）</label>
+                <input
+                  id="varLinkId"
+                  class="input"
+                  type="text"
+                  placeholder="例）youtube"
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+                <div class="help">QRに埋め込む識別子です。短くシンプルな名前がおすすめ。</div>
+              </div>
+              <div class="formRow">
+                <label class="label" for="varLinkUrl">飛び先URL</label>
+                <input
+                  id="varLinkUrl"
+                  class="input"
+                  type="url"
+                  placeholder="例）https://www.youtube.com/watch?v=..."
+                  autocomplete="off"
+                />
+                <div class="help">実際に転送したいURLです。</div>
+              </div>
             </div>
-
-            <div class="formRow">
-              <label class="label" for="variableUrl">② 飛び先URL</label>
-              <input
-                id="variableUrl"
-                class="input"
-                type="url"
-                placeholder="例）https://www.youtube.com/watch?v=..."
-                autocomplete="off"
-                spellcheck="false"
-              />
-              <div class="help">実際に飛ばしたいURLです。links.json に設定します。</div>
+            <div class="row">
+              <button id="varLinkSaveBtn" class="btn btn--primary" type="button">登録する</button>
+              <button id="varLinkCancelBtn" class="btn btn--ghost" type="button" hidden>キャンセル</button>
             </div>
+            <div id="varLinkFormStatus" class="varLinkFormStatus" role="alert" aria-live="polite"></div>
           </div>
 
-          <div class="varQrSummary" id="varQrSummary">
-            <div class="varQrSummary__row">
-              <span class="varQrSummary__label">QRに入るURL</span>
-              <span id="variableQrUrl" class="variableQrUrlText">（① IDを入力してください）</span>
+          <div class="divider"></div>
+
+          <!-- 登録済みリンク一覧 -->
+          <div class="label" style="margin-bottom: 8px;">登録済みリンク</div>
+          <div id="varLinkList" class="varLinkList"></div>
+
+          <!-- 現在QR化しているリンク -->
+          <div id="varQrActiveInfo" class="varQrActiveInfo" hidden>
+            <div class="varQrActiveInfo__top">
+              <span class="varQrActiveInfo__badge">QR作成中</span>
+              <strong id="varQrActiveId" class="varQrActiveInfo__id"></strong>
             </div>
-            <div class="varQrSummary__row">
-              <span class="varQrSummary__label">links.json に追加する行</span>
-              <code id="variableLinkEntry" class="variableLinkEntry">（① IDと② 飛び先URLを入力してください）</code>
-            </div>
-            <div class="varQrSummary__note" id="variableChangeNote" hidden>
-              あとから飛び先を変えたい場合は <code>links.json</code> の <strong id="variableIdRef"></strong> のURLだけ変更します。QRコードの刷り直し不要です。
-            </div>
+            <div id="varQrActiveQrUrl" class="varQrActiveInfo__url"></div>
+            <div class="help" style="margin-top: 4px;">↓ 下の STEP 3 でQRコードを確認・ダウンロードできます</div>
           </div>
+
         </div>
 
         <div class="grid2">

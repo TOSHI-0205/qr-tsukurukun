@@ -5,7 +5,7 @@
   ポイント：
   - QR生成は qr-code-styling を使用（ロゴ、色、形状変更が簡単）
   - 通常QR：入力したURLをそのままQR化
-  - 可変QR：go.html?id=xxx の固定URLをQR化（links.json で転送先を管理）
+  - 可変QR：go.html?id=xxx の固定URLをQR化。リンクは localStorage で管理
 */
 
 // ===== DOM取得（画面の部品） =====
@@ -15,14 +15,24 @@ const el = {
   modeVariable: document.getElementById("modeVariable"),
   normalQrSection: document.getElementById("normalQrSection"),
   variableQrSection: document.getElementById("variableQrSection"),
-  variableId: document.getElementById("variableId"),
-  variableUrl: document.getElementById("variableUrl"),
-  variableQrUrl: document.getElementById("variableQrUrl"),
-  variableLinkEntry: document.getElementById("variableLinkEntry"),
-  variableChangeNote: document.getElementById("variableChangeNote"),
-  variableIdRef: document.getElementById("variableIdRef"),
 
-  // QR入力
+  // 可変QR リンク管理フォーム
+  linkFormTitle: document.getElementById("linkFormTitle"),
+  varLinkId: document.getElementById("varLinkId"),
+  varLinkUrl: document.getElementById("varLinkUrl"),
+  varLinkSaveBtn: document.getElementById("varLinkSaveBtn"),
+  varLinkCancelBtn: document.getElementById("varLinkCancelBtn"),
+  varLinkFormStatus: document.getElementById("varLinkFormStatus"),
+
+  // 可変QR リンク一覧
+  varLinkList: document.getElementById("varLinkList"),
+
+  // 可変QR 現在QR化中インジケーター
+  varQrActiveInfo: document.getElementById("varQrActiveInfo"),
+  varQrActiveId: document.getElementById("varQrActiveId"),
+  varQrActiveQrUrl: document.getElementById("varQrActiveQrUrl"),
+
+  // QR生成共通
   qrText: document.getElementById("qrText"),
   qrSize: document.getElementById("qrSize"),
   errorCorrection: document.getElementById("errorCorrection"),
@@ -58,6 +68,15 @@ function clamp(n, min, max) {
   return Math.min(max, Math.max(min, n));
 }
 
+/** テキストを HTML にそのまま差し込むときに使う（XSS防止） */
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 // ===== モード管理（通常QR / 可変QR） =====
 let currentMode = "normal"; // "normal" | "variable"
 
@@ -70,6 +89,7 @@ function switchMode(mode) {
   el.modeVariable.classList.toggle("modeBtn--active", isVariable);
   el.modeNormal.setAttribute("aria-selected", String(!isVariable));
   el.modeVariable.setAttribute("aria-selected", String(isVariable));
+  if (isVariable) renderLinkList();
   updateQrPreview();
 }
 
@@ -78,9 +98,202 @@ function switchMode(mode) {
  * 現在のページと同じディレクトリにある go.html を使う
  */
 function getVariableQrUrl(id) {
-  // "index.html" や末尾のファイル名を除いてディレクトリパスを取る
   const base = location.href.replace(/\/[^/?#]*(\?.*)?$/, "/");
   return base + "go.html?id=" + encodeURIComponent(id);
+}
+
+// ===== localStorage リンク管理 =====
+const LINKS_STORAGE_KEY = "qrtsLinks";
+
+function loadLinks() {
+  try {
+    const raw = localStorage.getItem(LINKS_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveLinks(links) {
+  try {
+    localStorage.setItem(LINKS_STORAGE_KEY, JSON.stringify(links));
+  } catch (e) {
+    console.error("localStorage の書き込みに失敗しました", e);
+  }
+}
+
+// ===== リンク一覧の表示 =====
+/** 現在 QR化しているリンク ID（null なら未選択） */
+let variableSelectedId = null;
+
+/** 編集中のリンク ID（null なら新規登録モード） */
+let varLinkEditingId = null;
+
+function renderLinkList() {
+  const links = loadLinks();
+  const ids = Object.keys(links);
+  const container = el.varLinkList;
+
+  if (ids.length === 0) {
+    container.innerHTML =
+      '<div class="linkEmpty">まだリンクが登録されていません。上のフォームから追加してください。</div>';
+    refreshActiveInfo(links);
+    return;
+  }
+
+  container.innerHTML = "";
+  for (const id of ids) {
+    const url = links[id];
+    const isActive = id === variableSelectedId;
+    const item = document.createElement("div");
+    item.className = "linkItem" + (isActive ? " linkItem--active" : "");
+
+    item.innerHTML = `
+      <div class="linkItem__info">
+        <div class="linkItem__id">${escHtml(id)}</div>
+        <div class="linkItem__url">${escHtml(url)}</div>
+      </div>
+      <div class="linkItem__actions">
+        <button class="btn btn--primary btn--sm" data-action="qr" data-id="${escHtml(id)}" type="button">QR作成</button>
+        <button class="btn btn--ghost btn--sm" data-action="edit" data-id="${escHtml(id)}" type="button">編集</button>
+        <button class="btn btn--ghost btn--sm btn--danger" data-action="delete" data-id="${escHtml(id)}" type="button">削除</button>
+      </div>
+    `;
+    container.appendChild(item);
+  }
+
+  refreshActiveInfo(links);
+}
+
+/** 「QR作成中」インジケーターを更新する */
+function refreshActiveInfo(links) {
+  if (!variableSelectedId || !links[variableSelectedId]) {
+    // 選択中 ID が消えていたらリセット
+    if (variableSelectedId && !links[variableSelectedId]) {
+      variableSelectedId = null;
+      updateQrPreview();
+    }
+    el.varQrActiveInfo.hidden = true;
+    return;
+  }
+  el.varQrActiveId.textContent = variableSelectedId;
+  el.varQrActiveQrUrl.textContent = getVariableQrUrl(variableSelectedId);
+  el.varQrActiveInfo.hidden = false;
+}
+
+// ===== リンク登録・編集・削除 =====
+
+/** 登録 / 更新ボタンの処理 */
+function handleSaveLink() {
+  const id = (el.varLinkId.value || "").trim();
+  const url = (el.varLinkUrl.value || "").trim();
+
+  // バリデーション
+  if (!id) {
+    el.varLinkFormStatus.textContent = "IDを入力してください。";
+    el.varLinkId.focus();
+    return;
+  }
+  if (!/^[\w-]+$/.test(id)) {
+    el.varLinkFormStatus.textContent = "IDは半角英数字とハイフン（-）のみ使えます。";
+    el.varLinkId.focus();
+    return;
+  }
+  if (!url) {
+    el.varLinkFormStatus.textContent = "飛び先URLを入力してください。";
+    el.varLinkUrl.focus();
+    return;
+  }
+  if (!/^https?:\/\/.+/.test(url)) {
+    el.varLinkFormStatus.textContent = "URLは http:// または https:// から始めてください。";
+    el.varLinkUrl.focus();
+    return;
+  }
+
+  const links = loadLinks();
+
+  // 新規登録で同じ ID が既に存在する場合（編集中に自分と同じ ID は上書き OK）
+  if (!varLinkEditingId && links[id]) {
+    el.varLinkFormStatus.textContent = `ID「${id}」はすでに登録されています。別のIDを使うか、一覧から編集してください。`;
+    el.varLinkId.focus();
+    return;
+  }
+  // 編集中にIDを変更した場合、既存の別IDと衝突しないか確認
+  if (varLinkEditingId && varLinkEditingId !== id && links[id]) {
+    el.varLinkFormStatus.textContent = `ID「${id}」はすでに登録されています。別のIDにしてください。`;
+    el.varLinkId.focus();
+    return;
+  }
+
+  // 編集中にIDを変更した場合は古いエントリを削除
+  if (varLinkEditingId && varLinkEditingId !== id) {
+    delete links[varLinkEditingId];
+    if (variableSelectedId === varLinkEditingId) {
+      variableSelectedId = id;
+    }
+  }
+
+  links[id] = url;
+  saveLinks(links);
+
+  el.varLinkFormStatus.textContent = "";
+  resetLinkForm();
+  renderLinkList();
+}
+
+/** フォームを「新規登録」の状態に戻す */
+function resetLinkForm() {
+  varLinkEditingId = null;
+  el.varLinkId.value = "";
+  el.varLinkUrl.value = "";
+  el.varLinkSaveBtn.textContent = "登録する";
+  el.varLinkCancelBtn.hidden = true;
+  el.varLinkFormStatus.textContent = "";
+  el.linkFormTitle.textContent = "リンクを登録する";
+}
+
+/** 一覧の「編集」を押したときにフォームを埋める */
+function startEditLink(id) {
+  const links = loadLinks();
+  const url = links[id];
+  if (url === undefined) return;
+
+  varLinkEditingId = id;
+  el.varLinkId.value = id;
+  el.varLinkUrl.value = url;
+  el.varLinkSaveBtn.textContent = "更新する";
+  el.varLinkCancelBtn.hidden = false;
+  el.varLinkFormStatus.textContent = "";
+  el.linkFormTitle.textContent = `「${id}」を編集中`;
+  el.varLinkId.scrollIntoView({ behavior: "smooth", block: "center" });
+  el.varLinkId.focus();
+}
+
+/** 一覧の「削除」を押したとき */
+function deleteLink(id) {
+  if (!confirm(`「${id}」を削除しますか？\nこのリンクのQRコードは使えなくなります。`)) return;
+  const links = loadLinks();
+  delete links[id];
+  saveLinks(links);
+  if (variableSelectedId === id) {
+    variableSelectedId = null;
+    updateQrPreview();
+  }
+  if (varLinkEditingId === id) {
+    resetLinkForm();
+  }
+  renderLinkList();
+}
+
+/** 一覧の「QR作成」を押したとき */
+function selectLinkForQr(id) {
+  variableSelectedId = id;
+  updateQrPreview();
+  renderLinkList();
+  // STEP 3 のプレビューへスクロール
+  el.qrPreview.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
 // ===== プリセットロゴ（data URL） =====
@@ -135,21 +348,15 @@ const PRESET_LOGOS = {
 // FileReader で data URL にしたうえで使います（PNG ダウンロードも同じ画像が使われます）。
 let uploadedLogoDataUrl = null;
 
-/** アップロード済みロゴのデータだけ消す（ファイル入力は触らない） */
 function clearUploadedLogoDataOnly() {
   uploadedLogoDataUrl = null;
 }
 
-/**
- * ロゴを完全にオフにするとき用（データ＋ファイル入力を空にする）
- * ※「change のたびに最初にこれを呼ぶ」と、選んだファイルが空になって読めなくなるので注意。
- */
 function clearUploadedLogo() {
   clearUploadedLogoDataOnly();
   el.logoUpload.value = "";
 }
 
-/** ファイルを Data URL（文字列）で読み込む */
 function readFileAsDataURL(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -159,10 +366,6 @@ function readFileAsDataURL(file) {
   });
 }
 
-/**
- * ロゴ画像の周りに「白い余白」を付けた画像を作る（読み取りやすさ用）
- * ※画像が小さいときは px、大きいときは比率でパディングが増えます。
- */
 function addWhitePaddingAroundImage(dataUrl, paddingRatio = 0.12) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -189,10 +392,6 @@ function addWhitePaddingAroundImage(dataUrl, paddingRatio = 0.12) {
   });
 }
 
-/**
- * qr-code-styling が画像を読み込むときの crossOrigin 設定
- * data:/blob: に anonymous を付けると Canvas に描画できない環境があるため付けません。
- */
 function crossOriginForImageUrl(url) {
   if (!url) return {};
   if (/^https?:\/\//i.test(url)) return { crossOrigin: "anonymous" };
@@ -200,21 +399,19 @@ function crossOriginForImageUrl(url) {
 }
 
 // ===== QR生成（qr-code-styling） =====
-// 初期設定（あとで update() で差分更新していきます）
 const qrCode = new QRCodeStyling({
   width: 280,
   height: 280,
-  type: "canvas", // PNGダウンロードしやすい
+  type: "canvas",
   data: "",
   qrOptions: {
     errorCorrectionLevel: "H",
   },
   image: undefined,
   imageOptions: {
-    // 中央のドットを消してロゴを浮かせる（これが無いとロゴが見えない／薄くなることがあります）
     hideBackgroundDots: true,
     margin: 12,
-    imageSize: 0.2, // QR全体に対して約20%
+    imageSize: 0.2,
   },
   dotsOptions: {
     type: "rounded",
@@ -231,14 +428,12 @@ const qrCode = new QRCodeStyling({
   backgroundOptions: {
     color: "#ffffff",
   },
-  margin: 10, // quiet zone（余白）
+  margin: 10,
 });
 
-// 画面にQRプレビューを描画
 qrCode.append(el.qrPreview);
 
 function getLogoImageUrl() {
-  // アップロードがある場合はそれが最優先
   if (uploadedLogoDataUrl) return uploadedLogoDataUrl;
   const presetKey = el.presetLogo.value;
   return PRESET_LOGOS[presetKey] || null;
@@ -263,28 +458,7 @@ function readUiState() {
   // モードによって QR のデータ元を切り替える
   let data;
   if (currentMode === "variable") {
-    const id = (el.variableId.value || "").trim();
-    const destUrl = (el.variableUrl.value || "").trim();
-
-    if (id) {
-      const redirectUrl = getVariableQrUrl(id);
-      data = redirectUrl;
-      el.variableQrUrl.textContent = redirectUrl;
-      // links.json に追加する行のプレビュー
-      if (destUrl) {
-        el.variableLinkEntry.textContent = `"${id}": "${destUrl}"`;
-      } else {
-        el.variableLinkEntry.textContent = `"${id}": "（② 飛び先URLを入力してください）"`;
-      }
-      // 「あとから変えたい場合」の注記
-      el.variableIdRef.textContent = `"${id}"`;
-      el.variableChangeNote.hidden = false;
-    } else {
-      data = "";
-      el.variableQrUrl.textContent = "（① IDを入力してください）";
-      el.variableLinkEntry.textContent = "（① IDと② 飛び先URLを入力してください）";
-      el.variableChangeNote.hidden = true;
-    }
+    data = variableSelectedId ? getVariableQrUrl(variableSelectedId) : "";
   } else {
     data = (el.qrText.value || "").trim();
   }
@@ -315,11 +489,17 @@ function updateQrPreview() {
   const s = readUiState();
   syncRangeLabels();
 
-  // 入力が空なら、ダウンロードを無効にして案内表示
   const hasData = s.data.length > 0;
   el.downloadPngBtn.disabled = !hasData;
-  if (!hasData) setStatus("内容を入力するとQRが表示されます。");
-  else setStatus("");
+  if (!hasData) {
+    setStatus(
+      currentMode === "variable"
+        ? "一覧から「QR作成」を押すとQRが表示されます。"
+        : "内容を入力するとQRが表示されます。"
+    );
+  } else {
+    setStatus("");
+  }
 
   const logoUrl = s.logoImageUrl || undefined;
   qrCode.update({
@@ -356,7 +536,6 @@ function updateQrPreview() {
 }
 
 // ===== PNGダウンロード =====
-/** Blob をファイルとして保存（一部モバイルで qr-code-styling の download() が弱いときの予備） */
 function downloadBlobAsFile(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -372,11 +551,10 @@ function downloadBlobAsFile(blob, filename) {
 async function downloadPng() {
   const s = readUiState();
   if (!s.data.trim()) {
-    setStatus("先に内容を入力してください。");
+    setStatus("先に内容を入力（または QR作成ボタンを押）してください。");
     return;
   }
 
-  // ファイル名をそれっぽく（URLは長いので短く）
   const safe = s.data
     .replace(/^https?:\/\//, "")
     .replace(/[^\w\-]+/g, "_")
@@ -386,7 +564,6 @@ async function downloadPng() {
 
   setStatus("PNGを作成中…");
 
-  // まず Blob を取得する（iOS の Web Share API にも使う）
   let blob = null;
   try {
     blob = await qrCode.getRawData("png");
@@ -395,8 +572,6 @@ async function downloadPng() {
     blob = null;
   }
 
-  // --- iOS Safari / Chrome: Web Share API でシェアシートを出す ---
-  // シェアシートの「写真に保存」を選ぶと写真アプリに保存できる
   const isIos = /iPhone|iPad|iPod/i.test(navigator.userAgent);
   if (isIos && blob && navigator.share) {
     const file = new File([blob], filename, { type: "image/png" });
@@ -409,7 +584,6 @@ async function downloadPng() {
         return;
       } catch (shareErr) {
         if (shareErr.name === "AbortError") {
-          // ユーザーがシェアシートをキャンセルした
           setStatus("");
           return;
         }
@@ -418,14 +592,12 @@ async function downloadPng() {
     }
   }
 
-  // --- PC・Android・iOS でシェアが使えない場合: 通常ダウンロード ---
   if (blob) {
     downloadBlobAsFile(blob, filename);
     setStatus("PNGをダウンロードしました。");
     return;
   }
 
-  // getRawData が使えない環境は qrCode.download() を試す
   try {
     await qrCode.download({ extension: "png", name });
     setStatus("PNGをダウンロードしました。");
@@ -443,7 +615,29 @@ const bindUpdate = (node) => updateEvents.forEach((ev) => node.addEventListener(
 el.modeNormal.addEventListener("click", () => switchMode("normal"));
 el.modeVariable.addEventListener("click", () => switchMode("variable"));
 
-// QR入力系
+// 可変QR フォーム操作
+el.varLinkSaveBtn.addEventListener("click", handleSaveLink);
+el.varLinkCancelBtn.addEventListener("click", resetLinkForm);
+
+// Enter キーでも登録できるように
+[el.varLinkId, el.varLinkUrl].forEach((input) => {
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") handleSaveLink();
+  });
+});
+
+// リンク一覧のボタン（イベント委譲）
+el.varLinkList.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-action]");
+  if (!btn) return;
+  const action = btn.dataset.action;
+  const id = btn.dataset.id;
+  if (action === "qr") selectLinkForQr(id);
+  else if (action === "edit") startEditLink(id);
+  else if (action === "delete") deleteLink(id);
+});
+
+// QR生成共通の入力系
 bindUpdate(el.qrText);
 bindUpdate(el.qrSize);
 bindUpdate(el.errorCorrection);
@@ -456,11 +650,8 @@ bindUpdate(el.quietZone);
 bindUpdate(el.presetLogo);
 bindUpdate(el.logoSize);
 bindUpdate(el.logoMargin);
-bindUpdate(el.variableId);
-bindUpdate(el.variableUrl);
 
 el.logoUpload.addEventListener("change", async () => {
-  // 以前アップロードした Data URL だけ破棄（input を空にしない＝今選んだファイルを残す）
   clearUploadedLogoDataOnly();
 
   const file = el.logoUpload.files && el.logoUpload.files[0];
